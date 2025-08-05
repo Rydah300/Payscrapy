@@ -1,6 +1,7 @@
+import os
+import re
 import requests
 from bs4 import BeautifulSoup
-import re
 import time
 import random
 import fake_useragent
@@ -12,11 +13,11 @@ import socket
 import logging
 import platform
 import hashlib
-import os
 from urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
 import threading
 from queue import Queue
+import signal
 
 # ANSI escape codes for colors
 BLUE = '\033[94m'
@@ -294,9 +295,9 @@ def search_google(query, num_results=10, proxy=None):
             break
     return urls[:num_results]
 
-def extract_emails(url, proxy=None):
+def extract_emails(url, proxy=None, scraped_emails=None):
     """
-    Extracts email addresses from the given URL.
+    Extracts email addresses from the given URL, avoiding previously scraped emails.
     """
     ua = fake_useragent.UserAgent()
     # Use a requests session with retry and backoff
@@ -311,7 +312,10 @@ def extract_emails(url, proxy=None):
         soup = BeautifulSoup(response.text, "html.parser")
         text = soup.get_text()
         emails = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
-        return emails
+        
+        # Filter out previously scraped emails
+        new_emails = [email for email in emails if email not in scraped_emails]
+        return new_emails
     except Exception as e:
         logging.error(f"{RED}Error fetching or parsing {url}: {e}{RESET}")
         return []
@@ -365,7 +369,7 @@ def rotate_proxy():
     ]
     return random.choice(proxies)
 
-def worker(company_queue, all_emails, valid_emails, proxy=None):
+def worker(company_queue, all_emails, valid_emails, scraped_emails, proxy=None):
     """
     Worker function to process company names and scrape emails.
     """
@@ -379,25 +383,52 @@ def worker(company_queue, all_emails, valid_emails, proxy=None):
             ceo_emails = generate_ceo_emails(company_name)
 
             for email in ceo_emails:
-                if validate_email(email):
-                    valid_emails.add(email)
-                all_emails.add(email)
+                if email not in scraped_emails:
+                    if validate_email(email):
+                        valid_emails.add(email)
+                    all_emails.add(email)
+                    scraped_emails.add(email)  # Add to scraped emails set
 
             search_query = f'"CEO" OR "Founder" OR "President" "{company_name}" contact email'
             urls = search_google(search_query, num_results=5, proxy=proxy)
 
             for url in urls:
-                emails = extract_emails(url, proxy=proxy)
-                for email in emails:
+                new_emails = extract_emails(url, proxy=proxy, scraped_emails=scraped_emails)
+                for email in new_emails:
                     if validate_email(email):
                         valid_emails.add(email)
                     all_emails.add(email)
+                    scraped_emails.add(email)  # Add to scraped emails set
                 time.sleep(random.uniform(5, 10))
 
         except Exception as e:
             logging.error(f"{RED}Error processing company {company_name}: {e}{RESET}")
 
         company_queue.task_done()
+
+def save_emails(valid_emails):
+    """
+    Saves the valid emails to a TXT file with a timestamped filename.
+    """
+    # Generate a unique filename using timestamp
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    filename = f"ceo_emails_{timestamp}.txt"
+
+    # Save the valid emails to a TXT file
+    with open(filename, "w") as f:
+        for email in valid_emails:
+            f.write(email + "\n")
+
+    print(f"{GREEN}\nGenerated and saved {len(valid_emails)} valid emails to {filename}{RESET}")
+
+def timeout_handler(signum, frame):
+    """
+    Handles the timeout signal and saves the scraped emails.
+    """
+    print(f"{RED}Scraping timed out after 1 hour.{RESET}")
+    save_emails(valid_emails)
+    print(f"{GREEN}Scrapper Successfully Done{RESET}")
+    exit(0)
 
 def main():
     """
@@ -454,7 +485,13 @@ def main():
     if choice == "1":
         company_names = get_company_names(num_companies=1000)  # Increased number of companies
         all_emails = set()
+        global valid_emails
         valid_emails = set()
+        scraped_emails = set()  # Initialize the set to store scraped emails
+
+        # Set the timeout handler
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(3600)  # 1 hour = 3600 seconds
 
         # Create a queue to hold company names
         company_queue = Queue()
@@ -465,7 +502,7 @@ def main():
         num_threads = 10  # Adjust the number of threads as needed
         threads = []
         for _ in range(num_threads):
-            t = threading.Thread(target=worker, args=(company_queue, all_emails, valid_emails, proxy))
+            t = threading.Thread(target=worker, args=(company_queue, all_emails, valid_emails, scraped_emails, proxy))
             threads.append(t)
             t.start()
 
@@ -476,18 +513,14 @@ def main():
         # Wait for all worker threads to finish
         company_queue.join()
 
-        # Generate a unique filename using timestamp
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        filename = f"ceo_emails_{timestamp}.txt"
-
-        # Save the valid emails to a TXT file
-        with open(filename, "w") as f:
-            for email in valid_emails:
-                f.write(email + "\n")
-
-        print(f"{GREEN}\nGenerated and saved {len(valid_emails)} valid emails to {filename}{RESET}")
+        # If the script finishes before the timeout, save the emails
+        signal.alarm(0)  # Disable the alarm
+        save_emails(valid_emails)
+        print(f"{GREEN}Scrapper Successfully Done{RESET}")
 
     elif choice == "2":
+        print("Exiting the tool. Saving emails before exiting...")
+        save_emails(valid_emails)
         print("Exiting the tool. Don't get caught, you sick fuck.")
         exit()
 
