@@ -18,8 +18,10 @@ from requests.adapters import HTTPAdapter
 import threading
 from queue import Queue
 
-# ANSI escape codes for blue color
+# ANSI escape codes for colors
 BLUE = '\033[94m'
+GREEN = '\033[92m'
+RED = '\033[91m'
 RESET = '\033[0m'
 
 # Big and "unique" style using ASCII art
@@ -55,7 +57,7 @@ def get_pc_unique_id():
         unique_id = hashlib.sha256(hardware_info.encode()).hexdigest()
         return unique_id
     except Exception as e:
-        logging.error(f"Error generating unique ID: {e}")
+        logging.error(f"{RED}Error generating unique ID: {e}{RESET}")
         return None
 
 def verify_license(license_key):
@@ -64,7 +66,7 @@ def verify_license(license_key):
     """
     pc_id = get_pc_unique_id()
     if not pc_id:
-        print("Failed to generate unique PC ID. Exiting.")
+        print(f"{RED}Failed to generate unique PC ID. Exiting.{RESET}")
         return False
 
     try:
@@ -75,18 +77,18 @@ def verify_license(license_key):
         for license in licenses:
             key, pc_id_in_repo = license.split(":")  # Assuming format is "license_key:pc_id"
             if key == license_key and pc_id_in_repo == pc_id:
-                print("License is valid.")
+                print(f"{GREEN}License is valid.{RESET}")
                 return True
 
-        print("License is invalid.")
+        print(f"{RED}License is invalid.{RESET}")
         return False
     except requests.exceptions.RequestException as e:
-        logging.error(f"Error communicating with GitHub: {e}")
-        print("Error communicating with GitHub.")
+        logging.error(f"{RED}Error communicating with GitHub: {e}{RESET}")
+        print(f"{RED}Error communicating with GitHub.{RESET}")
         return False
     except Exception as e:
-        logging.error(f"Error verifying license: {e}")
-        print("Error verifying license.")
+        logging.error(f"{RED}Error verifying license: {e}{RESET}")
+        print(f"{RED}Error verifying license.{RESET}")
         return False
 
 def get_company_names(num_companies=1000):  # Increased number of companies
@@ -122,11 +124,28 @@ def create_scraper_session(proxy=None):
 
     return session
 
+def validate_proxy(proxy):
+    """
+    Validates if the proxy is working.
+    """
+    try:
+        # Use a requests session with retry and backoff
+        session = create_scraper_session(proxy)
+        response = session.get("https://www.google.com", timeout=5)  # Simple test URL
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        logging.error(f"{RED}Proxy validation failed: {e}{RESET}")
+        return False
+
 def scrape_zippia(num_companies, proxy=None):
     """
     Scrapes company names from Zippia.
     """
     try:
+        if proxy and validate_proxy(proxy):
+            print(f"{GREEN}PROXY IS VALIDATED AND WORKING{RESET}")
+            time.sleep(5)
         url = "https://www.zippia.com/research/largest-companies-in-usa/"
         ua = fake_useragent.UserAgent()
         # Use a requests session with retry and backoff
@@ -139,7 +158,7 @@ def scrape_zippia(num_companies, proxy=None):
         company_names = [element.text.strip() for element in company_elements[:num_companies]]
         return company_names
     except Exception as e:
-        logging.error(f"Error getting company names from Zippia: {e}")
+        logging.error(f"{RED}Error getting company names from Zippia: {e}{RESET}")
         return []
 
 def scrape_fortune500(num_companies, proxy=None):
@@ -147,6 +166,9 @@ def scrape_fortune500(num_companies, proxy=None):
     Scrapes company names from Fortune 500 list.
     """
     try:
+        if proxy and validate_proxy(proxy):
+            print(f"{GREEN}PROXY IS VALIDATED AND WORKING{RESET}")
+            time.sleep(5)
         url = "https://fortune.com/fortune500/"
         ua = fake_useragent.UserAgent()
         # Use a requests session with retry and backoff
@@ -159,7 +181,7 @@ def scrape_fortune500(num_companies, proxy=None):
         company_names = [element.text.strip() for element in company_elements[:num_companies]]
         return company_names
     except Exception as e:
-        logging.error(f"Error getting company names from Fortune 500: {e}")
+        logging.error(f"{RED}Error getting company names from Fortune 500: {e}{RESET}")
         return []
 
 def scrape_wikipedia(num_companies, proxy=None):
@@ -167,6 +189,9 @@ def scrape_wikipedia(num_companies, proxy=None):
     Scrapes company names from a Wikipedia list of companies.
     """
     try:
+        if proxy and validate_proxy(proxy):
+            print(f"{GREEN}PROXY IS VALIDATED AND WORKING{RESET}")
+            time.sleep(5)
         url = "https://en.wikipedia.org/wiki/List_of_companies_based_in_the_United_States"
         ua = fake_useragent.UserAgent()
         # Use a requests session with retry and backoff
@@ -185,7 +210,7 @@ def scrape_wikipedia(num_companies, proxy=None):
                 break
         return company_names
     except Exception as e:
-        logging.error(f"Error getting company names from Wikipedia: {e}")
+        logging.error(f"{RED}Error getting company names from Wikipedia: {e}{RESET}")
         return []
 
 def scrape_crunchbase(num_companies, proxy=None):
@@ -194,6 +219,9 @@ def scrape_crunchbase(num_companies, proxy=None):
     (This is a simplified example and may require more sophisticated techniques)
     """
     try:
+        if proxy and validate_proxy(proxy):
+            print(f"{GREEN}PROXY IS VALIDATED AND WORKING{RESET}")
+            time.sleep(5)
         url = "https://www.crunchbase.com/search/organizations"  # Example URL
         ua = fake_useragent.UserAgent()
         # Use a requests session with retry and backoff
@@ -207,7 +235,7 @@ def scrape_crunchbase(num_companies, proxy=None):
         company_names = [element.text.strip() for element in company_elements[:num_companies]]
         return company_names
     except Exception as e:
-        logging.error(f"Error getting company names from Crunchbase: {e}")
+        logging.error(f"{RED}Error getting company names from Crunchbase: {e}{RESET}")
         return []
 
 def scrape_owler(num_companies, proxy=None):
@@ -216,6 +244,9 @@ def scrape_owler(num_companies, proxy=None):
     (This is a simplified example and may require more sophisticated techniques)
     """
     try:
+        if proxy and validate_proxy(proxy):
+            print(f"{GREEN}PROXY IS VALIDATED AND WORKING{RESET}")
+            time.sleep(5)
         url = "https://www.owler.com/company/browse"  # Example URL
         ua = fake_useragent.UserAgent()
         # Use a requests session with retry and backoff
@@ -229,7 +260,7 @@ def scrape_owler(num_companies, proxy=None):
         company_names = [element.text.strip() for element in company_elements[:num_companies]]
         return company_names
     except Exception as e:
-        logging.error(f"Error getting company names from Owler: {e}")
+        logging.error(f"{RED}Error getting company names from Owler: {e}{RESET}")
         return []
 
 def search_google(query, num_results=10, proxy=None):
@@ -243,6 +274,9 @@ def search_google(query, num_results=10, proxy=None):
     session = create_scraper_session(proxy)
     while len(urls) < num_results and start < 100:
         try:
+            if proxy and validate_proxy(proxy):
+                print(f"{GREEN}PROXY IS VALIDATED AND WORKING{RESET}")
+                time.sleep(5)
             url = f"https://www.google.com/search?q={quote(query)}&start={start}"
             headers = {"User-Agent": ua.random, "Accept-Language": "en-US,en;q=0.9"}
             response = session.get(url, headers=headers, timeout=10)
@@ -256,7 +290,7 @@ def search_google(query, num_results=10, proxy=None):
             start += 10
             time.sleep(random.uniform(5, 10))
         except Exception as e:
-            logging.error(f"Error during Google search: {e}")
+            logging.error(f"{RED}Error during Google search: {e}{RESET}")
             break
     return urls[:num_results]
 
@@ -268,6 +302,9 @@ def extract_emails(url, proxy=None):
     # Use a requests session with retry and backoff
     session = create_scraper_session(proxy)
     try:
+        if proxy and validate_proxy(proxy):
+            print(f"{GREEN}PROXY IS VALIDATED AND WORKING{RESET}")
+            time.sleep(5)
         headers = {"User-Agent": ua.random, "Accept-Language": "en-US,en;q=0.9"}
         response = session.get(url, headers=headers, timeout=10)
         response.raise_for_status()
@@ -276,7 +313,7 @@ def extract_emails(url, proxy=None):
         emails = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
         return emails
     except Exception as e:
-        logging.error(f"Error fetching or parsing {url}: {e}")
+        logging.error(f"{RED}Error fetching or parsing {url}: {e}{RESET}")
         return []
 
 def generate_ceo_emails(company_name):
@@ -358,7 +395,7 @@ def worker(company_queue, all_emails, valid_emails, proxy=None):
                 time.sleep(random.uniform(5, 10))
 
         except Exception as e:
-            logging.error(f"Error processing company {company_name}: {e}")
+            logging.error(f"{RED}Error processing company {company_name}: {e}{RESET}")
 
         company_queue.task_done()
 
@@ -368,43 +405,49 @@ def main():
     """
     license_key = input("Enter your license key: ")
     if not verify_license(license_key):
-        print("Invalid license. Exiting.")
+        print(f"{RED}Invalid license. Exiting.{RESET}")
         return
 
     # Add the "LICENSE IS VALID" message and delay
-    print("LICENSE IS VALID")
+    print(f"{GREEN}LICENSE IS VALID{RESET}")
     time.sleep(5)
 
     # Proxy input and selection
-    print("\nProxy Options:")
-    print("1. Use a single proxy")
-    print("2. Use a list of proxies from a file")
-    print("3. No proxy")
+    print(f"\n{BLUE}Proxy Options:{RESET}")
+    print(f"{GREEN}1. Use a single proxy{RESET}")
+    print(f"{GREEN}2. Use a list of proxies from a file{RESET}")
+    print(f"{GREEN}3. No proxy{RESET}")
 
     proxy_choice = input("Enter your proxy choice (1, 2, or 3): ")
 
     proxy = None
     if proxy_choice == "1":
         proxy = input("Enter your proxy (e.g., http://user:pass@host:port): ")
+        if proxy and not validate_proxy(proxy):
+            print(f"{RED}Proxy is invalid or not working. Exiting.{RESET}")
+            return
     elif proxy_choice == "2":
         proxy_file = input("Enter the path to your proxy list file: ")
         try:
             with open(proxy_file, "r") as f:
                 proxies = [line.strip() for line in f]
             proxy = random.choice(proxies)  # Choose a random proxy from the list
+            if proxy and not validate_proxy(proxy):
+                print(f"{RED}Proxy is invalid or not working. Exiting.{RESET}")
+                return
         except FileNotFoundError:
-            print("Proxy file not found. Exiting.")
+            print(f"{RED}Proxy file not found. Exiting.{RESET}")
             return
     elif proxy_choice == "3":
         print("No proxy will be used.")
     else:
-        print("Invalid proxy choice. Exiting.")
+        print(f"{RED}Invalid proxy choice. Exiting.{RESET}")
         return
 
     # Add the optional button
-    print("\nOptions:")
-    print("1. Start Extract Payroll Mails")
-    print("2. Exit")
+    print(f"\n{BLUE}Options:{RESET}")
+    print(f"{GREEN}1. Start Extract Payroll Mails{RESET}")
+    print(f"{GREEN}2. Exit{RESET}")
 
     choice = input("Enter your choice (1 or 2): ")
 
@@ -442,14 +485,14 @@ def main():
             for email in valid_emails:
                 f.write(email + "\n")
 
-        print(f"\nGenerated and saved {len(valid_emails)} valid emails to {filename}")
+        print(f"{GREEN}\nGenerated and saved {len(valid_emails)} valid emails to {filename}{RESET}")
 
     elif choice == "2":
         print("Exiting the tool. Don't get caught, you sick fuck.")
         exit()
 
     else:
-        print("Invalid choice. Exiting.")
+        print(f"{RED}Invalid choice. Exiting.{RESET}")
         exit()
 
 if __name__ == "__main__":
