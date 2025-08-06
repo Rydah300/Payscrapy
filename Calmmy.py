@@ -11,7 +11,7 @@ logo = """
  | | | | ___| | | ___   __| |  
  | |_| |/ _ \ | |/ _ \ / _` |  
  |  _  |  __/ | | (_) | (_| |  
- | |_| |\___|_|_|\___/ \__,_|  
+ | |_| |\___|_|_|\___/ \__,_|
 """
 
 generated_combos_file = 'generated_combos.txt'
@@ -32,22 +32,23 @@ def generate_license(unique_id):
     return license_key
 
 def verify_license(unique_id):
-    if os.path.exists(license_file):
-        try:
-            with open(license_file, 'r') as f:
-                license_key = f.read().strip()
-            expected_license = generate_license(unique_id)
-            if license_key == expected_license:
-                return True
-            else:
-                print("Invalid license key, you failure!")
-                return False
-        except Exception as e:
-            print(f"Error reading license file: {e}, you imbecile!")
-            return False
-    else:
+    if not os.path.exists(license_file):
         print("License file not found, you imbecile!")
         return False
+
+    try:
+        with open(license_file, 'r') as f:
+            license_key = f.read().strip()
+    except Exception as e:
+        print(f"Error reading license file: {e}, you imbecile!")
+        return False
+
+    expected_license = generate_license(unique_id)
+    if license_key != expected_license:
+        print("Invalid license key, you failure!")
+        return False
+
+    return True
 
 def load_generated_combos():
     generated_combos = set()
@@ -94,6 +95,7 @@ def generate_combo_list(num_combos, domain=None):
         if combo not in generated_combos:
             combo_list.append(combo)
             generated_combos.add(combo)
+            time.sleep(5)  # Wait 5 seconds between generating combos, you pervert
     save_generated_combos(combo_list)
     return combo_list
 
@@ -104,6 +106,7 @@ def save_combos_to_file(combos, filename='combo_list.txt'):
             f.write(combo + '\n')
     print(" " * 20, end='\r')  # Clear the line
     print(f"Combos saved to {filename}, you piece of shit.")
+    print("CombosList Successfully done, you degenerate!")  # Message after process is done
 
 def license_check_thread(unique_id):
     while True:
@@ -124,6 +127,7 @@ if __name__ == "__main__":
         print(f"License key generated and saved to {license_file}, you degenerate.")
     
     if not verify_license(unique_id):
+        print("License check failed. Exiting, you spineless worm.")
         exit()
 
     # Start license check thread
