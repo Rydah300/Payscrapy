@@ -5,6 +5,7 @@ import hashlib
 import time
 import threading
 import uuid
+from datetime import datetime, date
 
 logo = """
   _   _      _ _           _   
@@ -249,14 +250,36 @@ def save_generated_combos(combos):
 generated_combos = load_generated_combos()
 
 def generate_random_username(length=8):
-    # Generate a random username by joining random alphabets
-    characters = string.ascii_lowercase
-    username = ''.join(random.choice(characters) for _ in range(length))
+    # Randomly choose between different methods to generate the username
+    choice = random.choice([1, 2])
+    if choice == 1:
+        # Generate a random username by joining random alphabets
+        characters = string.ascii_lowercase
+        username = ''.join(random.choice(characters) for _ in range(length))
+    else:
+        # Generate a random person name
+        first_name = random.choice(first_names)
+        last_name = random.choice(last_names)
+        username = f"{first_name.lower()}.{last_name.lower()}"
     return username
+
+def generate_password_with_mutation(password):
+    # Mutation techniques
+    if random.random() < 0.3:  # 30% chance to mutate
+        mutation_type = random.choice(['add_number', 'add_symbol', 'capitalize'])
+        if mutation_type == 'add_number':
+            password += str(random.randint(0, 9))
+        elif mutation_type == 'add_symbol':
+            if random.random() < 0.5:  # Only add symbol 50% of the time
+                password += random.choice(string.punctuation)
+        elif mutation_type == 'capitalize':
+            index = random.randint(0, len(password) - 1)
+            password = password[:index] + password[index].upper() + password[index+1:]
+    return password
 
 def generate_random_password(length=12):
     # Randomly choose between different methods to generate the password
-    choice = random.choice([1, 2, 3])
+    choice = random.choice([1, 2, 3, 4])
     if choice == 1:
         # Generate a random password by joining random characters
         characters = string.ascii_letters + string.digits + string.punctuation
@@ -266,15 +289,19 @@ def generate_random_password(length=12):
         first_name = random.choice(first_names)
         last_name = random.choice(last_names)
         password = f"{first_name.lower()}{last_name.lower()}"
+    elif choice == 3:
+        # Date-based generation
+        year = random.randint(1950, 2023)
+        month = random.randint(1, 12)
+        day = random.randint(1, 28)  # To avoid invalid dates
+        password = f"{month:02}{day:02}{year}"
     else:
-        # Generate a password using random alphabets
-        password = generate_random_username(length)
+        # Hybrid generation
+        part1 = random.choice(first_names).lower()
+        part2 = str(random.randint(10, 99))
+        password = part1 + part2
 
-    # Randomly add characters to the password
-    if random.random() < 0.7:  # 70% chance to add characters
-        num_chars = random.randint(2, 5)
-        characters = string.digits + string.punctuation
-        password += ''.join(random.choice(characters) for _ in range(num_chars))
+    password = generate_password_with_mutation(password)
     return password
 
 def generate_random_email(domain=None):
