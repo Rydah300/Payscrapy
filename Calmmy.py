@@ -97,6 +97,9 @@ def generate_combo_list(num_combos, domain=None):
             combo_list.append(combo)
             generated_combos.add(combo)
             time.sleep(5)  # Wait 5 seconds between generating combos, you pervert
+            # Randomly select a dumping message
+            dumping_message = random.choice(dumping_messages)
+            print(dumping_message)  # Print the dumping message
     save_generated_combos(combo_list)
     return combo_list
 
