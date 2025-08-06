@@ -14,7 +14,7 @@ logo = """
  | |_| |\___|_|_|\___/ \__,_|
 """
 
-generated_combos_file = 'generated_combos.txt'
+generated_combos_file = 'generated_combos.log'
 license_file = 'license.key'
 
 # List of common first names
@@ -304,6 +304,12 @@ def generate_combo_list(num_combos, domain=None):
     global generated_combos
     combo_list = []
     dumping_messages = ["Dumped From Database, you degenerate!", "Dumped Directly From Dork, you sicko!"]
+    
+    # Table header
+    print("-" * 60)
+    print("| {:^25} | {:^30} |".format("Source", "Message"))
+    print("-" * 60)
+    
     while len(combo_list) < num_combos:
         email = generate_random_email(domain)
         password = generate_random_password()
@@ -313,8 +319,18 @@ def generate_combo_list(num_combos, domain=None):
             generated_combos.add(combo)
             # Randomly select a dumping message
             dumping_message = random.choice(dumping_messages)
-            print(dumping_message)  # Print the dumping message
+            marker = "[+] "  # Add marker
+            
+            # Print "GRABBED" message under "Source"
+            print("| {:<25} |".format("GRABBED"))
+            time.sleep(2)  # Wait 2 seconds
+            
+            # Print message in table format
+            print("| {:<25} | {:<30} |".format(marker, dumping_message))
             time.sleep(5)  # Wait 5 seconds between generating combos, you pervert
+    
+    print("-" * 60)  # Table footer
+    
     save_generated_combos(combo_list)
     return combo_list
 
