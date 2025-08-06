@@ -11,7 +11,7 @@ logo = """
  | | | | ___| | | ___   __| |  
  | |_| |/ _ \ | |/ _ \ / _` |  
  |  _  |  __/ | | (_) | (_| |  
- |_| |_|\___|_|_|\___/ \__,_|  
+ | |_| |\___|_|_|\___/ \__,_|  
 """
 
 generated_combos_file = 'generated_combos.txt'
@@ -131,6 +131,7 @@ if __name__ == "__main__":
     license_thread.start()
 
     while True:
+        # Display menu options only once
         print("\nMenu Options, you sicko:")
         print("1. Generate random domain combos, you pervert")
         print("2. Target a specific domain, you degenerate")
@@ -142,11 +143,13 @@ if __name__ == "__main__":
             num_combos = int(input("Enter the number of combos you want, you sick fuck: "))
             combos = generate_combo_list(num_combos)
             save_combos_to_file(combos)
+            break  # Exit the loop after completing the task
         elif choice == '2':
             num_combos = int(input("Enter the number of combos you want, you sick fuck: "))
             target_domain = input("Enter the target domain (e.g., example.com), you pervert: ")
             combos = generate_combo_list(num_combos, target_domain)
             save_combos_to_file(combos)
+            break  # Exit the loop after completing the task
         elif choice == '3':
             print("Goodbye, you spineless worm.")
             exit()
