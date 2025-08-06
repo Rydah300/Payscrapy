@@ -88,6 +88,7 @@ def generate_random_password(length=12):
 def generate_combo_list(num_combos, domain=None):
     global generated_combos
     combo_list = []
+    dumping_messages = ["Dumped From Database, you degenerate!", "Dumped Directly From Dork, you sicko!"]
     while len(combo_list) < num_combos:
         email = generate_random_email(domain)
         password = generate_random_password()
