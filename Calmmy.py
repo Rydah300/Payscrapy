@@ -26,7 +26,26 @@ first_names = [
     "Maria", "Susan", "Margaret", "Dorothy", "Lisa", "Nancy", "Karen", "Betty",
     "Helen", "Sandra", "Donna", "Carol", "Ruth", "Sharon", "Michelle", "Laura",
     "Sarah", "Kimberly", "Deborah", "Jessica", "Shirley", "Cynthia", "Angela",
-    "Melissa", "Brenda", "Amy", "Anna"
+    "Melissa", "Brenda", "Amy", "Anna", "Jason", "Jeffrey", "Gary", "Larry", "Justin",
+    "Scott", "Brandon", "Benjamin", "Samuel", "Gregory", "Henry", "Patrick", "Raymond",
+    "Dennis", "Tyler", "Aaron", "Jose", "Adam", "Nathan", "Zachary", "Peter", "Kyle",
+    "Jonathan", "Stephen", "Eric", "Kelly", "Janice", "Evelyn", "Joan", "Victoria",
+    "Katherine", "Nicole", "Samantha", "Julie", "Heather", "Teresa", "Doris", "Gloria",
+    "Evelyn", "Jean", "Cheryl", "Mildred", "Kathleen", "Andrea", "Beverly", "Olivia",
+    "Emma", "Ava", "Sophia", "Isabella", "Mia", "Charlotte", "Abigail", "Emily",
+    "Madison", "Elizabeth", "Chloe", "Ella", "Avery", "Sofia", "Aubrey", "Scarlett",
+    "Grace", "Amelia", "Addison", "Lily", "Natalie", "Hannah", "Lillian", "Brooklyn",
+    "Leah", "Zoe", "Audrey", "Savannah", "Allison", "Samantha", "Claire", "Hazel",
+    "Penelope", "Aurora", "Eleanor", "Willow", "Violet", "Stella", "Maya", "Brynn",
+    "Naomi", "Delilah", "Serenity", "Athena", "Adeline", "Ruby", "Ivy", "Annabelle",
+    "Alice", "Sadie", "Eva", "Lucy", "June", "Lydia", "Clara", "Eliza", "Eleanor",
+    "Adeline", "Rosalie", "Theodora", "Winifred", "Bernice", "Marjorie", "Mabel",
+    "Beatrice", "Imogen", "Florence", "Sybil", "Muriel", "Eunice", "Myrtle", "Ethel",
+    "Agnes", "Beryl", "Enid", "Gladys", "Gwendoline", "Hilda", "Irene", "Joyce",
+    "Lilian", "Mavis", "Phyllis", "Sheila", "Shirley", "Thelma", "Vera", "Audrey",
+    "Brenda", "Carol", "Diane", "Janice", "Jean", "Joan", "Joyce", "Judith", "Karen",
+    "Linda", "Margaret", "Marilyn", "Nancy", "Pamela", "Sandra", "Sharon", "Susan",
+    "Valerie", "Wendy"
 ]
 
 # List of common last names
@@ -36,7 +55,143 @@ last_names = [
     "Thomas", "Taylor", "Moore", "Jackson", "Martin", "Lee", "Perez", "Thompson",
     "White", "Harris", "Sanchez", "Clark", "Ramirez", "Lewis", "Robinson", "Walker",
     "Young", "Allen", "King", "Wright", "Scott", "Torres", "Nguyen", "Hill", "Adams",
-    "Nelson", "Baker", "Hall", "Rivera", "Campbell", "Mitchell", "Carter", "Roberts"
+    "Nelson", "Baker", "Hall", "Rivera", "Campbell", "Mitchell", "Carter", "Roberts",
+    "Gomez", "Phillips", "Evans", "Turner", "Diaz", "Cruz", "Reed", "Bailey", "Bell",
+    "Kelly", "Howard", "Ward", "Cox", "Richardson", "Fisher", "Gray", "Powell",
+    "Long", "Morgan", "Murphy", "Cook", "Rogers", "Griffin", "Ortiz", "Edwards",
+    "Wood", "Hughes", "Sullivan", "Morris", "Collins", "Green", "Ross", "Myers",
+    "Ford", "Hamilton", "Graham", "Reynolds", "Woods", "Cole", "West", "Jordan",
+    "Rice", "Schmidt", "Fuller", "Kennedy", "Wells", "Perry", "Dunn", "Stephens",
+    "Arnold", "Brewer", "Bennett", "Weaver", "Fox", "Gilbert", "Snyder", "Field",
+    "Hines", "Stone", "Owens", "Porter", "Shaw", "Warren", "Sanders", "Newman",
+    "Moss", "Tucker", "Miles", "Craig", "Burns", "Wagner", "Fleming", "Jacobs",
+    "Strickland", "French", "Becker", "Hodge", "Bishop", "Chase", "Austin", "Gardner",
+    "Barrett", "Romero", "Hicks", "Mullen", "Boyd", "Mason", "Nichols", "Ireland",
+    "Silvers", "Winters", "Summers", "Springs", "Autumns", "Colds", "Warmers",
+    "Lights", "Darks", "Noons", "Midnights", "Shadows", "Ghosts", "Demons",
+    "Angels", "Saints", "Sinners", "Prayers", "Curses", "Blessings", "Damnings",
+    "Fires", "Waters", "Earths", "Winds", "Stars", "Moons", "Suns", "Planets",
+    "Galaxies", "Universes", "Realities", "Illusions", "Dreams", "Nightmares",
+    "Hopes", "Fears", "Loves", "Hates", "Lives", "Deaths", "Beginnings", "Endings",
+    "Secrets", "Lies", "Truths", "Myths", "Legends", "Fables", "Stories", "Poems",
+    "Songs", "Dances", "Paintings", "Sculptures", "Buildings", "Ruins", "Memories",
+    "Forgotten", "Remembered", "Lost", "Found", "Created", "Destroyed", "Changed",
+    "Constant", "Fleeting", "Eternal", "Ephemeral", "Sacred", "Profane", "Holy",
+    "Unholy", "Pure", "Corrupt", "Innocent", "Guilty", "Right", "Wrong", "Good",
+    "Evil", "Beautiful", "Ugly", "Pleasant", "Painful", "Joyful", "Sorrowful",
+    "Peaceful", "Violent", "Calm", "Turbulent", "Orderly", "Chaotic", "Simple",
+    "Complex", "Clear", "Obscure", "Visible", "Invisible", "Audible", "Silent",
+    "Tangible", "Intangible", "Known", "Unknown", "Possible", "Impossible", "Real",
+    "Imaginary", "Natural", "Artificial", "Human", "Animal", "Plant", "Mineral",
+    "Abstract", "Concrete", "General", "Specific", "Whole", "Part", "Center",
+    "Edge", "Above", "Below", "Inside", "Outside", "Before", "After", "During",
+    "Now", "Then", "Always", "Never", "Everywhere", "Nowhere", "Something",
+    "Nothing", "Everything"
+]
+
+# List of email domains
+email_domains = [
+    'gmail.com', 'yahoo.com', 'hotmail.com', 'aol.com', 'msn.com', 'outlook.com',
+    'live.com', 'icloud.com', 'mail.com', 'gmx.com', 'zoho.com', 'yandex.com',
+    'protonmail.com', 'hushmail.com', 'fastmail.com', 'tutanota.com', 'runbox.com',
+    'keemailly.com', 'disroot.org', 'riseup.net',
+    # Different country webmail domains
+    'mail.ru',  # Russia
+    'rambler.ru', # Russia
+    'list.ru', # Russia
+    'inbox.ru', # Russia
+    'bk.ru', # Russia
+    'qip.ru', # Russia
+    'pochta.ru', # Russia
+    'km.ru', # Russia
+    'my.com', # Russia
+    'email.ru', # Russia
+    'internet.ru', # Russia
+    'land.ru', # Russia
+    'autorambler.ru', # Russia
+    'lenta.ru', # Russia
+    'msk.ru', # Russia
+    'newsru.com', # Russia
+    'ngs.ru', # Russia
+    'sibnet.ru', # Russia
+    'tatar-inform.ru', # Russia
+    'vesti.ru', # Russia
+    'yuga.ru', # Russia
+    'qq.com',  # China
+    '163.com',  # China
+    'sina.com',  # China
+    '126.com', # China
+    'sohu.com', # China
+    'yeah.net', # China
+    'chinaren.com', # China
+    'xinhuanet.com', # China
+    'people.com.cn', # China
+    'cntv.cn', # China
+    'cctv.com', # China
+    'naver.com',  # South Korea
+    'daum.net',  # South Korea
+    'nate.com', # South Korea
+    'yahoo.co.jp',  # Japan
+    'goo.ne.jp', # Japan
+    'ocn.ne.jp', # Japan
+    'nifty.com', # Japan
+    'biglobe.ne.jp', # Japan
+    'infoseek.jp', # Japan
+    'dion.ne.jp', # Japan
+    'jcom.home.ne.jp', # Japan
+    'zaq.ne.jp', # Japan
+    'plala.or.jp', # Japan
+    'auone-net.jp', # Japan
+    'so-net.ne.jp', # Japan
+    'eonet.ne.jp', # Japan
+    'hi-ho.ne.jp', # Japan
+    'gate02.ne.jp', # Japan
+    'sannet.ne.jp', # Japan
+    'mail.fr',  # France
+    'laposte.net', # France
+    'gmx.de',  # Germany
+    'web.de',  # Germany
+    'freenet.de', # Germany
+    'ymail.com', # globally
+    'bol.com.br', #Brazil
+    'terra.com.br', #Brazil
+    'virgilio.it', #Italy
+    'libero.it', #Italy
+    'tiscali.it', #Italy
+    'tin.it', #Italy
+    'alice.it', #Italy
+    'fastwebnet.it', #Italy
+    'email.it', #Italy
+    'bluewin.ch', #Italy
+    'tele2.it', #Italy
+    'vodafone.it', #Italy
+    'iol.it', #Italy
+    'inwind.it', #Italy
+    'supereva.it', #Italy
+    'uol.com.br',  # Brazil
+    'ig.com.br',  # Brazil
+    'zipmail.com.br',  # Brazil
+    'globomail.com',  # Brazil
+    'oi.com.br',  # Brazil
+    'r7.com',  # Brazil
+    'click21.com.br',  # Brazil
+    'itelefonica.com.br',  # Brazil
+    'zaz.com.br',  # Brazil
+    'cultura.com.br',  # Brazil
+    'estadao.com.br',  # Brazil
+    'abril.com.br',  # Brazil
+    'brturbo.com.br',  # Brazil
+    'canalvip.com.br',  # Brazil
+    'netcenter.com.br',  # Brazil
+    'mct.gov.br',  # Brazil
+    'dedalus.com.br',  # Brazil
+    'mandic.com.br',  # Brazil
+    'matrix.com.br',  # Brazil
+    'openlink.com.br',  # Brazil
+    'originet.com.br',  # Brazil
+    'prodemge.gov.br',  # Brazil
+    'sti.com.br',  # Brazil
+
 ]
 
 def get_unique_id():
@@ -111,14 +266,12 @@ def generate_random_password(length=12):
         first_name = random.choice(first_names)
         last_name = random.choice(last_names)
         password = f"{first_name.lower()}{last_name.lower()}"
-        # Add some random characters to make it stronger
-        num_chars = random.randint(2, 5)
-        characters = string.digits + string.punctuation
-        password += ''.join(random.choice(characters) for _ in range(num_chars))
     else:
         # Generate a password using random alphabets
         password = generate_random_username(length)
-        # Add some random characters to make it stronger
+
+    # Randomly add characters to the password
+    if random.random() < 0.7:  # 70% chance to add characters
         num_chars = random.randint(2, 5)
         characters = string.digits + string.punctuation
         password += ''.join(random.choice(characters) for _ in range(num_chars))
@@ -144,7 +297,7 @@ def generate_random_email(domain=None):
     if domain:
         return f'{username}@{domain}'
     else:
-        domain = random.choice(['gmail.com', 'yahoo.com', 'hotmail.com', 'aol.com'])
+        domain = random.choice(email_domains)
         return f'{username}@{domain}'
 
 def generate_combo_list(num_combos, domain=None):
