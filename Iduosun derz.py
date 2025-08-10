@@ -75,11 +75,9 @@ def setup_logging():
         os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.INFO)
-        # File handler for logging to serpent.log
         file_handler = logging.FileHandler(LOG_FILE)
         file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
         logger.addHandler(file_handler)
-        # Null handler to prevent console output
         logger.addHandler(logging.NullHandler())
         return logger
     except Exception as e:
@@ -93,7 +91,6 @@ REQUIRED_MODULES = ["tabulate", "colorama", "cryptography", "tqdm", "keyboard", 
 if platform.system() == "Windows":
     REQUIRED_MODULES.append("wmi")
 
-# Install missing modules
 def install_missing_modules():
     missing_modules = []
     for module in REQUIRED_MODULES:
@@ -558,9 +555,6 @@ def display_instructions():
     print(f"\n{Fore.RED}{' ' * padding}{instructions}{Style.RESET_ALL}")
 
 def display_autograb_codes():
-    """
-    Display all autograb codes in a single-column tabular format with yellow text.
-    """
     table_data = [
         {"Autograb Code": f"{Fore.YELLOW}[{key}]{Style.RESET_ALL}"}
         for key in AUTOGRAB_DATA.keys()
@@ -575,7 +569,6 @@ def display_autograb_codes():
     print(f"\n{Fore.CYAN}{' ' * ((terminal_width - len(header)) // 2)}{header}{Style.RESET_ALL}")
     print(tabulate(table_data, headers="keys", tablefmt="grid"))
 
-# Autograb Links Storage
 def save_autograb_links(links: List[str]):
     max_attempts = 3
     for attempt in range(max_attempts):
@@ -603,7 +596,6 @@ def load_autograb_links() -> List[str]:
         logger.error(f"Chaos-FILE: Failed to load links: {str(e)}")
         return []
 
-# Spam Filtering
 def analyze_spam_content(message: str) -> float:
     score = 0.0
     message_lower = message.lower()
@@ -617,11 +609,10 @@ def check_spam_content(messages: List[str]) -> List[Dict[str, any]]:
         {
             "message": msg,
             "score": analyze_spam_content(msg),
-            "level": "Low" if analyze_spam_content(msg) < SPAM_THRESHOLD_LOW else "Medium" if analyze_spam_content(msgolk) < SPAM_THRESHOLD_HIGH else "High"
+            "level": "Low" if analyze_spam_content(msg) < SPAM_THRESHOLD_LOW else "Medium" if analyze_spam_content(msg) < SPAM_THRESHOLD_HIGH else "High"
         } for msg in messages
     ]
 
-# SMTP Configuration Loading
 def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
     try:
         if not os.path.exists(smtp_file):
@@ -674,7 +665,6 @@ def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
         print(f"{Fore.RED}Chaos-SMTP: Failed to load SMTP configs: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
-# Message Loading (MODERN SENDER MODE)
 def load_messages(message_file: str) -> List[str]:
     try:
         if not os.path.exists(message_file):
@@ -1196,13 +1186,13 @@ def main():
             os.environ["STARTUP_MODE"] = "non_interactive"
         chaos_id = chaos_string(5)
         # Format date and time in US Eastern Time for logging
-        current_time = datetime(2025, 8, 10, 15, 59).strftime("%Y-%m-%d %I:%M %p")
+        current_time = datetime(2025, 8, 10, 16, 18).strftime("%Y-%m-%d %I:%M %p")
         # Validate license
         is_valid, license_key, expiration_date, days_remaining = validate_license()
         if not is_valid:
             sys.exit(1)
-        # Display "SMS SERPENT RUNNING......." in a box, bold yellow, centered
-        startup_message = "SMS SERPENT RUNNING......."
+        # Display "SMS SERPENT RUNNING" in a box, bold yellow, centered
+        startup_message = "SMS SERPENT RUNNING"
         terminal_width = shutil.get_terminal_size().columns
         message_length = len(startup_message)
         box_width = message_length + 4  # 2 spaces padding on each side
@@ -1217,10 +1207,12 @@ def main():
             revoke_license()
             return
         if os.getenv("STARTUP_MODE") != "non_interactive":
-            print(f"\n{Fore.CYAN}License Information:{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}License Key: {license_key}{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}Expiration Date: {expiration_date}{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}Days Remaining: {days_remaining}{Style.RESET_ALL}")
+            license_data = [
+                {"License Information:": f"{Fore.CYAN}License Key{Style.RESET_ALL}", "Value": f"{Fore.CYAN}{license_key}{Style.RESET_ALL}"},
+                {"License Information:": f"{Fore.CYAN}Expiration Date{Style.RESET_ALL}", "Value": f"{Fore.CYAN}{expiration_date}{Style.RESET_ALL}"},
+                {"License Information:": f"{Fore.CYAN}Days Remaining{Style.RESET_ALL}", "Value": f"{Fore.CYAN}{days_remaining}{Style.RESET_ALL}"}
+            ]
+            print(f"\n{tabulate(license_data, headers='keys', tablefmt='grid')}")
         if not os.path.exists(CSV_FILE):
             logger.error(f"Chaos-FILE: Numbers file not found: {CSV_FILE}")
             print(f"{Fore.RED}Chaos-FILE: Numbers file not found: {CSV_FILE}{Style.RESET_ALL}")
