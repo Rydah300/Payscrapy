@@ -470,7 +470,7 @@ def validate_license() -> Tuple[bool, Optional[str], Optional[str], Optional[int
         logger.info("Chaos-LIC: Generating new license")
         save_license_key(expected_key, issuance_date, hardware_id)
         expiration_date = current_date + timedelta(days=LICENSE_VALIDITY_DAYS)
-        print(f"\n{Fore.CYAN}New license generated (expires {expiration_date}){Style.RESET_ALL}")
+        print(f"\n{Fore.LIGHTBLUE_EX}New license generated (expires {expiration_date}){Style.RESET_ALL}")
         return True, expected_key, expiration_date.strftime("%Y-%m-%d %H:%M:%S"), LICENSE_VALIDITY_DAYS
     
     stored_key = license_data.get("license_key")
@@ -491,7 +491,7 @@ def validate_license() -> Tuple[bool, Optional[str], Optional[str], Optional[int
             print(f"\n{Fore.RED}Chaos-LIC: Invalid license key{Style.RESET_ALL}")
             return False, None, None, None
         logger.info(f"Chaos-LIC: License valid (expires {expiration_date})")
-        print(f"\n{Fore.CYAN}License valid (expires {expiration_date}, {days_remaining} days remaining){Style.RESET_ALL}")
+        print(f"\n{Fore.LIGHTBLUE_EX}License valid (expires {expiration_date}, {days_remaining} days remaining){Style.RESET_ALL}")
         return True, stored_key, expiration_date.strftime("%Y-%m-%d %H:%M:%S"), days_remaining
     except Exception as e:
         logger.error(f"Chaos-LIC: Invalid license format: {str(e)}")
@@ -1186,7 +1186,7 @@ def main():
             os.environ["STARTUP_MODE"] = "non_interactive"
         chaos_id = chaos_string(5)
         # Format date and time in US Eastern Time for logging
-        current_time = datetime(2025, 8, 10, 16, 33).strftime("%Y-%m-%d %I:%M %p")
+        current_time = datetime(2025, 8, 10, 16, 43).strftime("%Y-%m-%d %I:%M %p")
         # Validate license
         is_valid, license_key, expiration_date, days_remaining = validate_license()
         if not is_valid:
@@ -1207,27 +1207,11 @@ def main():
             revoke_license()
             return
         if os.getenv("STARTUP_MODE") != "non_interactive":
-            # Display license information in a box
-            header = f"{Fore.BLUE}License Information:{Style.RESET_ALL}"
-            license_lines = [
-                f"{Fore.CYAN}License Key: {license_key}{Style.RESET_ALL}",
-                f"{Fore.CYAN}Expiration Date: {expiration_date}{Style.RESET_ALL}",
-                f"{Fore.CYAN}Days Remaining: {days_remaining}{Style.RESET_ALL}"
-            ]
-            max_content_width = max(
-                len(header.replace(Fore.BLUE, '').replace(Style.RESET_ALL, '')),
-                max(len(line.replace(Fore.CYAN, '').replace(Style.RESET_ALL, '')) for line in license_lines)
-            )
-            box_width = max_content_width + 4  # 2 spaces padding on each side
-            padding = (terminal_width - box_width) // 2 if terminal_width > box_width else 0
-            horizontal_border = "+" + "-" * (max_content_width + 2) + "+"
-            print(f"\n{' ' * padding}{Fore.BLUE}{horizontal_border}{Style.RESET_ALL}")
-            print(f"{' ' * padding}{Fore.BLUE}| {header:<{max_content_width}} |{Style.RESET_ALL}")
-            print(f"{' ' * padding}{Fore.BLUE}| {Fore.WHITE}{'-' * len(header.replace(Fore.BLUE, '').replace(Style.RESET_ALL, '')):<{max_content_width}}{Style.RESET_ALL} |{Style.RESET_ALL}")
-            for line in license_lines:
-                line_clean = line.replace(Fore.CYAN, '').replace(Style.RESET_ALL, '')
-                print(f"{' ' * padding}{Fore.BLUE}| {line_clean:<{max_content_width}} |{Style.RESET_ALL}")
-            print(f"{' ' * padding}{Fore.BLUE}{horizontal_border}{Style.RESET_ALL}")
+            # Display license information without box or underline
+            print(f"\n{Fore.LIGHTBLUE_EX}License Information:{Style.RESET_ALL}")
+            print(f"{Fore.LIGHTBLUE_EX}License Key: {license_key}{Style.RESET_ALL}")
+            print(f"{Fore.LIGHTBLUE_EX}Expiration Date: {expiration_date}{Style.RESET_ALL}")
+            print(f"{Fore.LIGHTBLUE_EX}Days Remaining: {days_remaining}{Style.RESET_ALL}")
         if not os.path.exists(CSV_FILE):
             logger.error(f"Chaos-FILE: Numbers file not found: {CSV_FILE}")
             print(f"{Fore.RED}Chaos-FILE: Numbers file not found: {CSV_FILE}{Style.RESET_ALL}")
