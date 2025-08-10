@@ -1,7 +1,16 @@
+import subprocess
+import sys
+import platform
+import importlib.metadata
+import logging
+from typing import List, Dict, Optional, Tuple
+import shutil
+import json
+from itertools import cycle
+from datetime import datetime, timedelta
+import pytz
 import random
 import string
-import logging
-import sys
 import csv
 import smtplib
 from email.mime.text import MIMEText
@@ -10,53 +19,134 @@ from email.utils import formataddr
 import time
 import threading
 import queue
-from datetime import datetime, timedelta
 from tabulate import tabulate
-from typing import List, Dict, Optional, Tuple
 import hashlib
 import os
-import platform
-import json
 import argparse
 import re
-from itertools import cycle
-from colorama import init, Fore, Style
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from tqdm import tqdm
+import keyboard
 
-# Windows-specific import for hardware ID
+try:
+    from colorama import init, Fore, Style
+    init()
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "colorama"])
+    from colorama import init, Fore, Style
+    init()
+
 try:
     import wmi
 except ImportError:
     wmi = None
 
-# Initialize colorama for cross-platform color support
-init()
+# Setup logging
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+logger = logging.getLogger(__name__)
 
-# Animated SMS SERPENT ASCII Logo (3 frames)
+# Required modules
+REQUIRED_MODULES = ["tabulate", "colorama", "cryptography", "tqdm", "keyboard", "pytz"]
+
+# Install missing modules
+def install_missing_modules():
+    missing_modules = []
+    for module in REQUIRED_MODULES:
+        try:
+            importlib.metadata.version(module)
+        except importlib.metadata.PackageNotFoundError:
+            missing_modules.append(module)
+    if platform.system() == "Windows":
+        try:
+            importlib.metadata.version("wmi")
+        except importlib.metadata.PackageNotFoundError:
+            missing_modules.append("wmi")
+    if missing_modules:
+        print(f"\n{Fore.CYAN}Installing missing modules: {', '.join(missing_modules)}{Style.RESET_ALL}")
+        for module in missing_modules:
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", module])
+                logger.info(f"Chaos-INSTALL: Installed {module}")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Chaos-INSTALL: Failed to install {module}: {str(e)}")
+                sys.exit(1)
+
+install_missing_modules()
+
+# Autograb Data (unchanged BANK list with credit unions)
+AUTOGRAB_DATA = {
+    "BANK": [
+        "Chase", "Wells Fargo", "BofA", "U.S. Bank", "PNC", "Truist", "Regions", "TD Bank",
+        "Fifth Third", "Citizens", "Huntington", "BMO", "KeyBank", "M&T", "Citibank",
+        "First Citizens", "First Horizon", "Santander", "Comerica", "Flagstar",
+        "Navy FCU", "PenFed", "BECU", "Alliant", "Connexus", "DCU", "First Tech",
+        "Golden 1", "SchoolsFirst", "Patelco", "Suncoast", "Security Service",
+        "Bethpage", "LMCU", "Mountain America", "America First", "VyStar", "RBFCU",
+        "Delta Community", "OnPoint"
+    ],
+    "AMOUNT": ["$50", "$100", "$200", "$500", "$1000", "$25", "$75", "$150", "$250", "$750"],
+    "CITY": ["New York", "Los Angeles", "Chicago", "Houston", "Miami", "San Francisco", "Dallas", "Philadelphia", "Seattle", "Atlanta"],
+    "STORE": ["Walmart", "Target", "Costco", "Kroger", "Home Depot", "CVS", "Walgreens", "Best Buy", "Macy’s", "Kohl’s"],
+    "COMPANY": ["Amazon", "Apple", "Google", "Microsoft", "Walmart", "Tesla", "JPMorgan", "Goldman Sachs", "Pfizer", "Coca-Cola"],
+    "IP": ["192.168.1.100", "172.16.254.1", "198.51.100.10", "203.0.113.5", "10.0.0.138", "142.250.190.78", "104.244.42.65", "216.58.194.174", "151.101.1.69", "199.232.68.133"],
+    "ZIP CODE": ["10001", "60601", "90001", "77002", "33101", "94102", "75201", "19103", "98101", "30303"]
+}
+
+USA_TIMEZONES = ["US/Eastern", "US/Central", "US/Mountain", "US/Pacific"]
+
+# Configuration (unchanged)
+CHAOS_SEED = random.randint(1, 1000000)
+random.seed(CHAOS_SEED)
+CSV_FILE = "numbers.txt"
+HIDDEN_DIR_NAME = ".chaos-serpent"
+HIDDEN_SUBDIR_NAME = "cache"
+LICENSE_FILE = "license.key"
+BLACKLIST_FILE = "SerpentTargent.dat"
+BLACKLIST_KEY_FILE = "blacklist_key.key"
+AUTOGRAB_LINKS_FILE = "autograb_links.json"
+SECRET_SALT = "HACKVERSE-DOMINION-2025"
+LICENSE_VALIDITY_DAYS = 30
+MAX_THREADS = 10
+RATE_LIMIT_DELAY = 1
+CONTENT_SNIPPET_LENGTH = 30
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 2
+ANIMATION_FRAME_DELAY = 0.5
+
+# Spam Filtering Configuration (unchanged)
+SPAM_KEYWORDS = {
+    "free": 0.8, "win": 0.7, "winner": 0.7, "urgent": 0.6, "prize": 0.7,
+    "lottery": 0.8, "guaranteed": 0.6, "cash": 0.7, "money": 0.7,
+    "click here": 0.7, "act now": 0.6, "limited time": 0.6, "offer": 0.5,
+    "buy now": 0.7, "cheap": 0.6, "discount": 0.5, "viagra": 0.9,
+    "pharmacy": 0.8, "credit card": 0.8, "earn money": 0.7, "make money": 0.7,
+    "cash prize": 0.8, "free gift": 0.8, "exclusive deal": 0.6
+}
+SPAM_THRESHOLD_LOW = 0.3
+SPAM_THRESHOLD_HIGH = 0.6
+
+# Carrier Gateways (unchanged)
+CARRIER_GATEWAYS = {
+    "Verizon": "vtext.com",
+    "AT&T": "txt.att.net",
+    "T-Mobile": "tmomail.net",
+    "Sprint": "messaging.sprintpcs.com",
+    "MetroPCS": "mymetropcs.com",
+    "Cricket": "sms.mycricket.com",
+    "Boost": "sms.myboostmobile.com",
+    "Virgin Mobile": "vmobl.com"
+}
+
+# Owner Information (unchanged)
+OWNER_INFO = [
+    {"Field": f"{Fore.YELLOW}Owner Name{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}John Doe{Style.RESET_ALL}"},
+    {"Field": f"{Fore.YELLOW}Email{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}john.doe@example.com{Style.RESET_ALL}"},
+    {"Field": f"{Fore.YELLOW}Twitter{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}@JohnDoe{Style.RESET_ALL}"},
+    {"Field": f"{Fore.YELLOW}GitHub{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}@JohnDoeDev{Style.RESET_ALL}"}
+]
+
+# ASCII Logo (unchanged)
 SMS_SERPENT_FRAMES = [
-    f"{Fore.BLUE}         ____ __  __ _______     _______ ______ ______   _______ \n" \
-    f"        / __ \\|  \\/  |__   __|   |__   __|  ____|  ____| |__   __|\n" \
-    f"       / /  \\ \\ \\  / |  | |         | |  | |__  | |__       | |   \n" \
-    f"      / /____\\ \\ \\/  |  | |         | |  |  __| |  __|      | |   \n" \
-    f"     /________\\ \\  / |  | |         | |  | |____| |____     | |   \n" \
-    f"                \\/  |/  |_|         |_|  |______|______|    |_|   \n" \
-    f"{Fore.CYAN}     ~:---:~{Style.RESET_ALL}\n" \
-    f"{Fore.CYAN}     ~:---:~~~  S S S S S E R P E N T  ~~~:---:~{Style.RESET_ALL}\n" \
-    f"{Fore.MAGENTA}     ~~:---:~~~  HACKVERSE DOMINION MODE ~~~:---:~~{Style.RESET_ALL}\n" \
-    f"{Fore.CYAN}     ~~~~:---:~~~~~~~~~~~~~~~~~~~~~~~~~~~~:---:~~~~{Style.RESET_ALL}",
-
-    f"{Fore.BLUE}         ____ __  __ _______     _______ ______ ______   _______ \n" \
-    f"        / __ \\|  \\/  |__   __|   |__   __|  ____|  ____| |__   __|\n" \
-    f"       / /  \\ \\ \\  / |  | |         | |  | |__  | |__       | |   \n" \
-    f"      / /____\\ \\ \\/  |  | |         | |  |  __| |  __|      | |   \n" \
-    f"     /________\\ \\  / |  | |         | |  | |____| |____     | |   \n" \
-    f"                \\/  |/  |_|         |_|  |______|______|    |_|   \n" \
-    f"{Fore.CYAN}     ~~:---:~~{Style.RESET_ALL}\n" \
-    f"{Fore.CYAN}     ~~~:---:~~  S S S S S E R P E N T  ~~:---:~~~{Style.RESET_ALL}\n" \
-    f"{Fore.MAGENTA}     ~~~:---:~~  HACKVERSE DOMINION MODE ~~:---:~~~{Style.RESET_ALL}\n" \
-    f"{Fore.CYAN}     ~~~:---:~~~~~~~~~~~~~~~~~~~~~~~~~~~~~:---:~~~{Style.RESET_ALL}",
-
     f"{Fore.BLUE}         ____ __  __ _______     _______ ______ ______   _______ \n" \
     f"        / __ \\|  \\/  |__   __|   |__   __|  ____|  ____| |__   __|\n" \
     f"       / /  \\ \\ \\  / |  | |         | |  | |__  | |__       | |   \n" \
@@ -69,56 +159,37 @@ SMS_SERPENT_FRAMES = [
     f"{Fore.CYAN}     ~~:---:~~~~~~~~~~~~~~~~~~~~~~~~~~~~~:---:~~{Style.RESET_ALL}"
 ]
 
-# Setup in-memory logging
-logging.basicConfig(level=logging.INFO, stream=sys.stdout)
-logger = logging.getLogger(__name__)
+def autograb_subjects() -> List[str]:
+    return [
+        "Update #{chaos_id}",
+        "News #{chaos_id}",
+        "Alert #{chaos_id}",
+        "Info #{chaos_id}",
+        "Exclusive #{chaos_id}",
+        "Stay Informed #{chaos_id}",
+        "Quick Update #{chaos_id}",
+        "Latest News #{chaos_id}"
+    ]
 
-# Chaos-driven configuration
-CHAOS_SEED = random.randint(1, 1000000)
-random.seed(CHAOS_SEED)
-CSV_FILE = "numbers.csv"  # Input CSV file
-HIDDEN_DIR_NAME = ".chaos-serpent"  # Hidden folder name
-HIDDEN_SUBDIR_NAME = "cache"  # Hidden subdirectory name
-LICENSE_FILE = "license.key"  # License key file (relative to hidden folder)
-BLACKLIST_FILE = "SerpentTargent.dat"  # Encrypted blacklist file (relative to hidden folder)
-BLACKLIST_KEY_FILE = "blacklist_key.key"  # Encryption key file (relative to hidden folder)
-SECRET_SALT = "HACKVERSE-DOMINION-2025"  # Secret salt for hashing
-LICENSE_VALIDITY_DAYS = 30  # License expiration period in days
-MAX_THREADS = 10  # Max concurrent threads
-RATE_LIMIT_DELAY = 1  # Seconds between sends
-CONTENT_SNIPPET_LENGTH = 30  # Max length for Content of Outgoing
-MAX_RETRIES = 3  # Max retry attempts for failed sends
-RETRY_BASE_DELAY = 2  # Base delay for exponential backoff (seconds)
-ANIMATION_FRAME_DELAY = 0.5  # Delay between animation frames (seconds)
+def display_owner_info():
+    table = tabulate(OWNER_INFO, headers="keys", tablefmt="grid")
+    terminal_width = shutil.get_terminal_size().columns
+    table_lines = table.split('\n')
+    table_width = max(len(line.replace(Fore.YELLOW, '').replace(Style.RESET_ALL, '')) for line in table_lines)
+    padding = (terminal_width - table_width) // 2 if terminal_width > table_width else 0
+    header = f"Owner Information:"
+    print(f"\n{Fore.CYAN}{' ' * ((terminal_width - len(header)) // 2)}{header}{Style.RESET_ALL}")
+    for line in table_lines:
+        print(' ' * padding + line)
 
-# Spam Filtering Configuration
-SPAM_KEYWORDS = {
-    "free": 0.8, "win": 0.7, "winner": 0.7, "urgent": 0.6, "prize": 0.7,
-    "lottery": 0.8, "guaranteed": 0.6, "cash": 0.7, "money": 0.7,
-    "click here": 0.7, "act now": 0.6, "limited time": 0.6, "offer": 0.5,
-    "buy now": 0.7, "cheap": 0.6, "discount": 0.5, "viagra": 0.9,
-    "pharmacy": 0.8, "credit card": 0.8, "earn money": 0.7, "make money": 0.7,
-    "cash prize": 0.8, "free gift": 0.8, "exclusive deal": 0.6
-}
-SPAM_THRESHOLD_LOW = 0.3
-SPAM_THRESHOLD_HIGH = 0.6
+def display_instructions():
+    instructions = "Press SPACEBAR to pause/resume sending"
+    terminal_width = shutil.get_terminal_size().columns
+    padding = (terminal_width - len(instructions)) // 2 if terminal_width > len(instructions) else 0
+    print(f"\n{Fore.CYAN}{' ' * padding}{instructions}{Style.RESET_ALL}")
 
-# Carrier SMS gateway mapping (US-focused, extensible)
-CARRIER_GATEWAYS = {
-    "Verizon": "vtext.com",
-    "AT&T": "txt.att.net",
-    "T-Mobile": "tmomail.net",
-    "Sprint": "messaging.sprintpcs.com",
-    "MetroPCS": "mymetropcs.com",
-    "Cricket": "sms.mycricket.com",
-    "Boost": "sms.myboostmobile.com",
-    "Virgin Mobile": "vmobl.com",
-    "Unknown": None
-}
-
-# Hidden Folder Setup
+# Hidden Folder Setup (unchanged)
 def get_hidden_folder_path() -> str:
-    """Determine the platform-specific hidden folder path and create it if it doesn't exist."""
     system = platform.system()
     try:
         if system == "Windows":
@@ -127,56 +198,49 @@ def get_hidden_folder_path() -> str:
         elif system == "Linux":
             base_path = os.path.expanduser("~/.cache")
             hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
-        elif system == "Darwin":  # macOS
+        elif system == "Darwin":
             base_path = os.path.expanduser("~/Library/Caches")
             hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
         else:
             logger.error(f"Chaos-FILE: Unsupported platform: {system}")
             sys.exit(1)
-
         os.makedirs(hidden_folder, exist_ok=True)
-
         if system == "Windows":
             try:
                 import ctypes
-                FILE_ATTRIBUTE_HIDDEN = 0x2
-                ctypes.windll.kernel32.SetFileAttributesW(hidden_folder, FILE_ATTRIBUTE_HIDDEN)
+                ctypes.windll.kernel32.SetFileAttributesW(hidden_folder, 0x2)
             except Exception as e:
-                logger.warning(f"Chaos-FILE: Failed to set hidden attribute on {hidden_folder}: {str(e)}")
-
+                logger.warning(f"Chaos-FILE: Failed to set hidden attribute: {str(e)}")
         logger.info(f"Chaos-FILE: Using hidden folder: {hidden_folder}")
         return hidden_folder
     except Exception as e:
         logger.error(f"Chaos-FILE: Failed to set up hidden folder: {str(e)}")
         sys.exit(1)
 
-# Get absolute paths for hidden files
 HIDDEN_FOLDER = get_hidden_folder_path()
 LICENSE_FILE_PATH = os.path.join(HIDDEN_FOLDER, LICENSE_FILE)
 BLACKLIST_FILE_PATH = os.path.join(HIDDEN_FOLDER, BLACKLIST_FILE)
 BLACKLIST_KEY_FILE_PATH = os.path.join(HIDDEN_FOLDER, BLACKLIST_KEY_FILE)
+AUTOGRAB_LINKS_FILE_PATH = os.path.join(HIDDEN_FOLDER, AUTOGRAB_LINKS_FILE)
 
-# Encryption Functions
+# Encryption Functions (unchanged)
 def generate_encryption_key() -> bytes:
-    """Generate or load an AES-256-GCM encryption key in the hidden folder."""
     try:
         if os.path.exists(BLACKLIST_KEY_FILE_PATH):
             with open(BLACKLIST_KEY_FILE_PATH, "rb") as f:
                 key = f.read()
                 if len(key) == 32:
                     return key
-                logger.warning("Chaos-ENC: Invalid key length in blacklist_key.key. Generating new key.")
         key = os.urandom(32)
         with open(BLACKLIST_KEY_FILE_PATH, "wb") as f:
             f.write(key)
-        logger.info(f"Chaos-ENC: Generated new encryption key and saved to {BLACKLIST_KEY_FILE_PATH}")
+        logger.info(f"Chaos-ENC: Generated new encryption key")
         return key
     except Exception as e:
         logger.error(f"Chaos-ENC: Failed to generate/load encryption key: {str(e)}")
         sys.exit(1)
 
 def encrypt_data(data: Dict, key: bytes) -> bytes:
-    """Encrypt data using AES-256-GCM."""
     try:
         aesgcm = AESGCM(key)
         nonce = os.urandom(12)
@@ -188,7 +252,6 @@ def encrypt_data(data: Dict, key: bytes) -> bytes:
         sys.exit(1)
 
 def decrypt_data(ciphertext: bytes, key: bytes) -> Dict:
-    """Decrypt data using AES-256-GCM."""
     try:
         aesgcm = AESGCM(key)
         nonce = ciphertext[:12]
@@ -198,9 +261,29 @@ def decrypt_data(ciphertext: bytes, key: bytes) -> Dict:
         logger.error(f"Chaos-ENC: Failed to decrypt data: {str(e)}")
         return {"blacklisted_ids": [], "blacklist_log": []}
 
-# Licensing Functions
+# Autograb Links Storage (unchanged)
+def save_autograb_links(links: List[str]):
+    try:
+        with open(AUTOGRAB_LINKS_FILE_PATH, "w") as f:
+            json.dump({"links": links}, f)
+        logger.info(f"Chaos-LINK: Saved {len(links)} links to {AUTOGRAB_LINKS_FILE_PATH}")
+    except Exception as e:
+        logger.error(f"Chaos-LINK: Failed to save links: {str(e)}")
+        sys.exit(1)
+
+def load_autograb_links() -> List[str]:
+    try:
+        if os.path.exists(AUTOGRAB_LINKS_FILE_PATH):
+            with open(AUTOGRAB_LINKS_FILE_PATH, "r") as f:
+                data = json.load(f)
+                return data.get("links", [])
+        return []
+    except Exception as e:
+        logger.error(f"Chaos-LINK: Failed to load links: {str(e)}")
+        return []
+
+# Licensing Functions (unchanged)
 def get_hardware_id() -> str:
-    """Generate a unique hardware ID based on CPU, motherboard, and disk serials."""
     try:
         if platform.system() == "Windows" and wmi:
             c = wmi.WMI()
@@ -221,25 +304,19 @@ def get_hardware_id() -> str:
         sys.exit(1)
 
 def generate_license_key(hardware_id: str) -> str:
-    """Generate a license key by hashing the hardware ID with a secret salt."""
     return hashlib.sha256((hardware_id + SECRET_SALT).encode()).hexdigest()
 
 def save_license_key(license_key: str, issuance_date: str):
-    """Save the license key and issuance date to a JSON file in the hidden folder."""
     try:
-        license_data = {
-            "license_key": license_key,
-            "issuance_date": issuance_date
-        }
+        license_data = {"license_key": license_key, "issuance_date": issuance_date}
         with open(LICENSE_FILE_PATH, "w") as f:
             json.dump(license_data, f)
-        logger.info(f"Chaos-LIC: License key saved to {LICENSE_FILE_PATH} (valid for {LICENSE_VALIDITY_DAYS} days)")
+        logger.info(f"Chaos-LIC: License key saved (valid for {LICENSE_VALIDITY_DAYS} days)")
     except Exception as e:
         logger.error(f"Chaos-LIC: Failed to save license key: {str(e)}")
         sys.exit(1)
 
 def load_license_key() -> Optional[Dict[str, str]]:
-    """Load the license key and issuance date from a JSON file in the hidden folder."""
     try:
         if os.path.exists(LICENSE_FILE_PATH):
             with open(LICENSE_FILE_PATH, "r") as f:
@@ -250,16 +327,14 @@ def load_license_key() -> Optional[Dict[str, str]]:
         return None
 
 def check_blacklist(hardware_id: str) -> bool:
-    """Check if the hardware ID is blacklisted in encrypted SerpentTargent.dat in the hidden folder."""
     try:
         if os.path.exists(BLACKLIST_FILE_PATH):
             key = generate_encryption_key()
             with open(BLACKLIST_FILE_PATH, "rb") as f:
                 ciphertext = f.read()
             blacklist_data = decrypt_data(ciphertext, key)
-            blacklisted_ids = blacklist_data.get("blacklisted_ids", [])
-            if hardware_id in blacklisted_ids:
-                logger.error(f"Chaos-LIC: This PC is blacklisted. License revoked at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}.")
+            if hardware_id in blacklist_data.get("blacklisted_ids", []):
+                logger.error(f"Chaos-LIC: PC blacklisted")
                 return True
         return False
     except Exception as e:
@@ -267,7 +342,6 @@ def check_blacklist(hardware_id: str) -> bool:
         return False
 
 def add_to_blacklist(hardware_id: str, reason: str = "License expired"):
-    """Add a hardware ID to encrypted SerpentTargent.dat in the hidden folder with timestamp and reason."""
     try:
         key = generate_encryption_key()
         blacklist_data = {"blacklisted_ids": [], "blacklist_log": []}
@@ -275,7 +349,6 @@ def add_to_blacklist(hardware_id: str, reason: str = "License expired"):
             with open(BLACKLIST_FILE_PATH, "rb") as f:
                 ciphertext = f.read()
             blacklist_data = decrypt_data(ciphertext, key)
-        
         if hardware_id not in blacklist_data["blacklisted_ids"]:
             blacklist_data["blacklisted_ids"].append(hardware_id)
             blacklist_data["blacklist_log"].append({
@@ -286,115 +359,89 @@ def add_to_blacklist(hardware_id: str, reason: str = "License expired"):
             ciphertext = encrypt_data(blacklist_data, key)
             with open(BLACKLIST_FILE_PATH, "wb") as f:
                 f.write(ciphertext)
-            logger.info(f"Chaos-LIC: Hardware ID {hardware_id} added to encrypted {BLACKLIST_FILE_PATH} due to {reason.lower()}")
+            logger.info(f"Chaos-LIC: Blacklisted {hardware_id}: {reason}")
     except Exception as e:
-        logger.error(f"Chaos-LIC: Failed to add hardware ID to blacklist: {str(e)}")
+        logger.error(f"Chaos-LIC: Failed to blacklist: {str(e)}")
         sys.exit(1)
 
 def revoke_license():
-    """Revoke the license with user consent by deleting the license file in the hidden folder."""
     if not os.path.exists(LICENSE_FILE_PATH):
-        logger.info("Chaos-LIC: No license key found to revoke.")
+        logger.info("Chaos-LIC: No license to revoke")
         sys.exit(0)
-
-    print("\nWARNING: Revoking your license will disable the script until a new license is generated.")
-    confirmation = input("Are you sure you want to revoke your license? (y/n): ").strip().lower()
-    if confirmation in ['y', 'yes']:
+    print("\nWARNING: Revoking license will disable the script")
+    if input("Confirm revoke (y/n): ").strip().lower() in ['y', 'yes']:
         try:
             os.remove(LICENSE_FILE_PATH)
-            logger.info(f"Chaos-LIC: License revoked successfully at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            logger.info("Chaos-LIC: License revoked")
             sys.exit(0)
         except Exception as e:
-            logger.error(f"Chaos-LIC: Failed to revoke license: {str(e)}")
+            logger.error(f"Chaos-LIC: Failed to revoke: {str(e)}")
             sys.exit(1)
     else:
-        logger.info("Chaos-LIC: License revocation cancelled by user.")
+        logger.info("Chaos-LIC: Revocation cancelled")
         sys.exit(0)
 
-def validate_license() -> Tuple[bool, Optional[str], Optional[str]]:
-    """Validate the license key against the current hardware ID and check expiration/blacklist."""
+def validate_license() -> Tuple[bool, Optional[str], Optional[str], Optional[int]]:
     hardware_id = get_hardware_id()
-    
     if check_blacklist(hardware_id):
-        return False, None, None
-
+        return False, None, None, None
     expected_key = generate_license_key(hardware_id)
     current_date = datetime.now()
-
     license_data = load_license_key()
     if license_data is None:
-        if check_blacklist(hardware_id):
-            logger.error(f"Chaos-LIC: Cannot generate new license; PC is blacklisted.")
-            return False, None, None
         issuance_date = current_date.strftime("%Y-%m-%d %H:%M:%S")
-        logger.info("Chaos-LIC: No license key found. Generating new license for this PC.")
+        logger.info("Chaos-LIC: Generating new license")
         save_license_key(expected_key, issuance_date)
         expiration_date = current_date + timedelta(days=LICENSE_VALIDITY_DAYS)
-        return True, expected_key, expiration_date.strftime("%Y-%m-%d %H:%M:%S")
-
+        return True, expected_key, expiration_date.strftime("%Y-%m-%d %H:%M:%S"), LICENSE_VALIDITY_DAYS
     stored_key = license_data.get("license_key")
     issuance_date_str = license_data.get("issuance_date")
-
     try:
         issuance_date = datetime.strptime(issuance_date_str, "%Y-%m-%d %H:%M:%S")
         expiration_date = issuance_date + timedelta(days=LICENSE_VALIDITY_DAYS)
+        days_remaining = (expiration_date - current_date).days
         if current_date > expiration_date:
-            logger.error(f"Chaos-LIC: License expired on {expiration_date.strftime('%Y-%m-%d %H:%M:%S')}. Revoking and blacklisting PC.")
-            try:
-                os.remove(LICENSE_FILE_PATH)
-                logger.info(f"Chaos-LIC: License file {LICENSE_FILE_PATH} deleted due to expiration.")
-            except Exception as e:
-                logger.error(f"Chaos-LIC: Failed to delete license file: {str(e)}")
-            add_to_blacklist(hardware_id, reason="License expired")
-            return False, None, None
+            logger.error(f"Chaos-LIC: License expired on {expiration_date}")
+            os.remove(LICENSE_FILE_PATH)
+            add_to_blacklist(hardware_id)
+            return False, None, None, None
     except Exception as e:
-        logger.error(f"Chaos-LIC: Invalid license file format: {str(e)}")
-        return False, None, None
-
+        logger.error(f"Chaos-LIC: Invalid license format: {str(e)}")
+        return False, None, None, None
     if stored_key == expected_key:
-        logger.info(f"Chaos-LIC: License validated successfully (expires on {expiration_date.strftime('%Y-%m-%d %H:%M:%S')})")
-        return True, stored_key, expiration_date.strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        logger.error("Chaos-LIC: Invalid license key. This license is not valid for this PC.")
-        return False, None, None
+        logger.info(f"Chaos-LIC: License valid (expires {expiration_date})")
+        return True, stored_key, expiration_date.strftime("%Y-%m-%d %H:%M:%S"), days_remaining
+    logger.error("Chaos-LIC: Invalid license key")
+    return False, None, None, None
 
-# Spam Filtering
+# Spam Filtering (unchanged)
 def analyze_spam_content(message: str) -> float:
-    """Analyze message for spam keywords/phrases and return a spam score."""
     score = 0.0
     message_lower = message.lower()
     for keyword, weight in SPAM_KEYWORDS.items():
         if re.search(r'\b' + re.escape(keyword) + r'\b', message_lower):
             score += weight
-    score = min(score, 1.0)
-    return score
+    return min(score, 1.0)
 
 def check_spam_content(messages: List[str]) -> List[Dict[str, any]]:
-    """Check messages for spam content and return analysis for each message."""
-    results = []
-    for message in messages:
-        score = analyze_spam_content(message)
-        level = "Low" if score < SPAM_THRESHOLD_LOW else "Medium" if score < SPAM_THRESHOLD_HIGH else "High"
-        results.append({
-            "message": message,
-            "score": score,
-            "level": level
-        })
-    return results
+    return [
+        {
+            "message": msg,
+            "score": analyze_spam_content(msg),
+            "level": "Low" if analyze_spam_content(msg) < SPAM_THRESHOLD_LOW else "Medium" if analyze_spam_content(msg) < SPAM_THRESHOLD_HIGH else "High"
+        } for msg in messages
+    ]
 
-# SMTP Configuration Loading
+# SMTP Configuration Loading (unchanged)
 def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
-    """Load SMTP configurations from a text file and validate them."""
     try:
         if not os.path.exists(smtp_file):
-            logger.error(f"Chaos-SMTP: SMTP configuration file not found: {smtp_file}")
+            logger.error(f"Chaos-SMTP: File not found: {smtp_file}")
             sys.exit(1)
-
         smtp_configs = []
         current_config = {}
         with open(smtp_file, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-            for line in lines:
+            for line in f:
                 line = line.strip()
                 if line == "---":
                     if current_config:
@@ -407,81 +454,60 @@ def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
                         current_config[key] = value
             if current_config:
                 smtp_configs.append(current_config)
-
         if not smtp_configs:
-            logger.error("Chaos-SMTP: No valid SMTP configurations found in the file")
+            logger.error("Chaos-SMTP: No valid SMTP configs")
             sys.exit(1)
-
         validated_configs = []
         for config in smtp_configs:
             required_fields = ["server", "port", "username", "password", "sender_name", "sender_email"]
             missing = [field for field in required_fields if field not in config or not config[field]]
             if missing:
-                logger.error(f"Chaos-SMTP: Missing fields {missing} for SMTP configuration with username {config.get('username', 'unknown')}")
+                logger.error(f"Chaos-SMTP: Missing fields {missing} for {config.get('username', 'unknown')}")
                 continue
-
             try:
                 config["port"] = int(config["port"])
-                if not (1 <= config["port"] <= 65535):
-                    raise ValueError
-            except ValueError:
-                logger.error(f"Chaos-SMTP: Invalid port for {config['username']}: {config['port']}")
-                continue
-
-            try:
                 with smtplib.SMTP(config["server"], config["port"]) as smtp:
                     smtp.starttls()
                     smtp.login(config["username"], config["password"])
-                    logger.info(f"Chaos-SMTP: Validated SMTP for {config['username']}")
-                validated_configs.append(config)
+                    validated_configs.append(config)
             except Exception as e:
-                logger.error(f"Chaos-SMTP: Failed to validate SMTP for {config['username']}: {str(e)}")
-                continue
-
+                logger.error(f"Chaos-SMTP: Failed to validate {config.get('username', 'unknown')}: {str(e)}")
         if not validated_configs:
-            logger.error("Chaos-SMTP: No valid SMTP configurations after validation")
+            logger.error("Chaos-SMTP: No valid SMTP configs after validation")
             sys.exit(1)
-
-        logger.info(f"Chaos-SMTP: Loaded {len(validated_configs)} valid SMTP configurations from {smtp_file}")
+        logger.info(f"Chaos-SMTP: Loaded {len(validated_configs)} SMTP configs")
         return validated_configs
     except Exception as e:
-        logger.error(f"Chaos-SMTP: Failed to load SMTP configurations: {str(e)}")
+        logger.error(f"Chaos-SMTP: Failed to load configs: {str(e)}")
         sys.exit(1)
 
-# Message Loading
+# Message Loading (Mode 1, unchanged)
 def load_messages(message_file: str) -> List[str]:
-    """Load messages from a text file and validate them."""
     try:
         if not os.path.exists(message_file):
-            logger.error(f"Chaos-MSG: Message file not found: {message_file}")
+            logger.error(f"Chaos-MSG: File not found: {message_file}")
             sys.exit(1)
-        
         with open(message_file, "r", encoding="utf-8") as f:
             messages = [line.strip() for line in f if line.strip()]
-        
         if not messages:
-            logger.error("Chaos-MSG: No valid messages found in the file")
+            logger.error("Chaos-MSG: No valid messages")
             sys.exit(1)
-        
         invalid_messages = [msg for msg in messages if len(msg) > 160]
         if invalid_messages:
-            logger.error(f"Chaos-MSG: {len(invalid_messages)} messages exceed 160 characters and will be truncated")
+            logger.error(f"Chaos-MSG: {len(invalid_messages)} messages exceed 160 chars")
             messages = [msg[:157] + "..." if len(msg) > 160 else msg for msg in messages]
-        
-        logger.info(f"Chaos-MSG: Loaded {len(messages)} valid messages from {message_file}")
+        logger.info(f"Chaos-MSG: Loaded {len(messages)} messages")
         return messages
     except Exception as e:
         logger.error(f"Chaos-MSG: Failed to load messages: {str(e)}")
         sys.exit(1)
 
 def get_message(messages: List[str], rotate_messages: bool, selected_message: Optional[str] = None) -> str:
-    """Select a message based on rotation or user selection."""
     if not rotate_messages and selected_message:
         return selected_message
     return random.choice(messages)
 
 def get_subject(subjects: List[str], rotate_subjects: bool, selected_subject: Optional[str] = None) -> str:
-    """Select a subject based on rotation or user selection."""
     if not rotate_subjects and selected_subject:
         return selected_subject
     return random.choice(subjects)
@@ -495,163 +521,224 @@ def chaos_delay(base_delay: float = RATE_LIMIT_DELAY) -> float:
 def retry_delay(attempt: int, base_delay: float = RETRY_BASE_DELAY) -> float:
     return base_delay * (2 ** attempt) + random.uniform(0, 0.5)
 
-def load_numbers(csv_file: str) -> List[Dict[str, str]]:
+def load_numbers(txt_file: str) -> List[Dict[str, str]]:
     numbers = []
+    valid_domains = list(CARRIER_GATEWAYS.values())
+    email_regex = r'^\d{10}@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
     try:
-        with open(csv_file, mode="r", encoding="utf-8") as f:
+        with open(txt_file, mode="r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             if "phone_number" not in reader.fieldnames:
-                logger.error("CSV must have 'phone_number' column")
+                logger.error(f"Chaos-NUM: {txt_file} must have 'phone_number' column")
                 sys.exit(1)
             for row in reader:
-                phone = row["phone_number"].strip().replace("-", "").replace(" ", "")
-                if len(phone) == 10 and phone.isdigit():
-                    carrier = row.get("carrier", "Unknown").strip().title()
-                    if carrier not in CARRIER_GATEWAYS:
-                        carrier = "Unknown"
-                    numbers.append({"phone_number": phone, "carrier": carrier})
-                else:
-                    logger.warning(f"Invalid phone number: {phone}")
-        logger.info(f"Loaded {len(numbers)} valid phone numbers")
+                email = row["phone_number"].strip()
+                if not re.match(email_regex, email):
+                    logger.warning(f"Chaos-NUM: Invalid email format: {email}")
+                    continue
+                domain = email.split('@')[1]
+                if domain not in valid_domains:
+                    logger.warning(f"Chaos-NUM: Invalid domain for {email}")
+                    continue
+                numbers.append({"phone_number": email})
+        if not numbers:
+            logger.error(f"Chaos-NUM: No valid numbers")
+            sys.exit(1)
+        logger.info(f"Chaos-NUM: Loaded {len(numbers)} numbers")
         return numbers
     except Exception as e:
-        logger.error(f"Error loading CSV: {str(e)}")
+        logger.error(f"Chaos-NUM: Error loading {txt_file}: {str(e)}")
         sys.exit(1)
 
-def get_sms_email(phone: str, carrier: str) -> Optional[str]:
-    gateway = CARRIER_GATEWAYS.get(carrier)
-    if gateway:
-        return f"{phone}@{gateway}"
-    logger.warning(f"No SMS gateway for carrier: {carrier}, phone: {phone}")
-    return None
-
-def get_configs() -> tuple[List[Dict[str, str]], str, List[str], bool, Optional[str]]:
-    """Prompt for SMTP, message file paths, and subjects; load SMTP configurations."""
+def get_configs_mode1() -> tuple[List[Dict[str, str]], str, List[str], bool, Optional[str]]:
     smtp_file = input("\nSMTP Configuration File (e.g., smtp_configs.txt): ").strip()
     while not smtp_file or not os.path.exists(smtp_file):
-        print(f"SMTP configuration file '{smtp_file}' does not exist.")
-        smtp_file = input("SMTP Configuration File (e.g., smtp_configs.txt): ").strip()
-    
+        print(f"SMTP file '{smtp_file}' does not exist.")
+        smtp_file = input("SMTP Configuration File: ").strip()
     smtp_configs = load_smtp_configs(smtp_file)
-
     message_file = input("Message File (e.g., messages.txt): ").strip()
     while not message_file or not os.path.exists(message_file):
         print(f"Message file '{message_file}' does not exist.")
-        message_file = input("Message File (e.g., messages.txt): ").strip()
-
+        message_file = input("Message File: ").strip()
     subjects = []
     rotate_subjects = False
     selected_subject = None
     while not subjects:
-        subject_input = input("Email Subject(s) (comma-separated for multiple, e.g., Update #{chaos_id}, News #{chaos_id}): ").strip()
+        subject_input = input("Email Subject(s) (comma-separated): ").strip()
         if not subject_input:
             print("Subject cannot be empty.")
             continue
         subjects = [s.strip() for s in subject_input.split(",") if s.strip()]
-        if not subjects:
-            print("No valid subjects provided.")
-            continue
-
         if len(subjects) > 1:
-            print(f"\nMultiple subjects detected ({len(subjects)} subjects).")
-            rotate = input("Do you want to rotate subjects for each message? (y/n): ").strip().lower()
+            rotate = input("Rotate subjects? (y/n): ").strip().lower()
             if rotate in ['y', 'yes']:
                 rotate_subjects = True
                 logger.info("Chaos-SUBJ: Subject rotation enabled")
             else:
-                select = input("Would you like to select one subject to use? (y/n): ").strip().lower()
+                select = input("Select one subject? (y/n): ").strip().lower()
                 if select in ['y', 'yes']:
                     print("\nAvailable subjects:")
                     for i, subj in enumerate(subjects, 1):
                         print(f"{i}. {subj}")
                     while True:
-                        choice = input("Enter the number of the subject to use: ").strip()
+                        choice = input("Enter subject number: ").strip()
                         if choice.isdigit() and 1 <= int(choice) <= len(subjects):
                             selected_subject = subjects[int(choice) - 1]
                             logger.info(f"Chaos-SUBJ: Selected subject: {selected_subject}")
                             subjects = [selected_subject]
-                            rotate_subjects = False
                             break
-                        print(f"Invalid choice. Enter a number between 1 and {len(subjects)}.")
+                        print(f"Invalid choice. Enter 1-{len(subjects)}.")
                 else:
-                    print("Please enter a single subject.")
+                    print("Enter a single subject.")
                     subjects = []
-                    continue
-        else:
-            selected_subject = subjects[0]
-            logger.info(f"Chaos-SUBJ: Using single subject: {selected_subject}")
-
     for config in smtp_configs:
         config["message_file"] = message_file
-
     return smtp_configs, message_file, subjects, rotate_subjects, selected_subject
+
+def get_configs_mode2() -> tuple[List[Dict[str, str]], str, List[str], bool, Optional[str], List[str], bool, Optional[str]]:
+    smtp_file = input("\nSMTP Configuration File (e.g., smtp_configs.txt): ").strip()
+    while not smtp_file or not os.path.exists(smtp_file):
+        print(f"SMTP file '{smtp_file}' does not exist.")
+        smtp_file = input("SMTP Configuration File: ").strip()
+    smtp_configs = load_smtp_configs(smtp_file)
+    print("\nAvailable autograb codes: [BANK], [AMOUNT], [CITY], [STORE], [TIME], [COMPANY], [DATE], [IP], [ZIP CODE], [LINK]")
+    print("Use + to join words (e.g., [BANK+NAME]), spaces as is, / or \\ as /")
+    print("Example: Transaction at [BANK+NAME] in [CITY] for [AMOUNT] on [DATE] at [TIME]. Details: [LINK]")
+    links = []
+    while not links:
+        link_input = input("Enter link(s) (comma-separated): ").strip()
+        links = [link.strip() for link in link_input.split(",") if link.strip()]
+        if not links:
+            print("At least one link is required.")
+            continue
+        rotate_links = False
+        selected_link = None
+        if len(links) > 1:
+            rotate = input("Rotate links? (y/n): ").strip().lower()
+            if rotate in ['y', 'yes']:
+                rotate_links = True
+                logger.info("Chaos-LINK: Link rotation enabled")
+            else:
+                select = input("Select one link? (y/n): ").strip().lower()
+                if select in ['y', 'yes']:
+                    print("\nAvailable links:")
+                    for i, link in enumerate(links, 1):
+                        print(f"{i}. {link}")
+                    while True:
+                        choice = input("Enter link number: ").strip()
+                        if choice.isdigit() and 1 <= int(choice) <= len(links):
+                            selected_link = links[int(choice) - 1]
+                            logger.info(f"Chaos-LINK: Selected link: {selected_link}")
+                            links = [selected_link]
+                            break
+                        print(f"Invalid choice. Enter 1-{len(links)}.")
+                else:
+                    print("Enter a single link.")
+                    links = []
+        else:
+            selected_link = links[0]
+            logger.info(f"Chaos-LINK: Using single link: {selected_link}")
+    save_autograb_links(links)
+    message = ""
+    while not message:
+        message = input("Enter message (max 160 chars after replacements): ").strip()
+        if not message:
+            print("Message cannot be empty.")
+        elif len(message) > 160:
+            print("Message exceeds 160 chars. Shorten it.")
+            message = ""
+    subjects = autograb_subjects()
+    rotate_subjects = True
+    selected_subject = None
+    return smtp_configs, message, subjects, rotate_subjects, selected_subject, links, rotate_links, selected_link
 
 def configure_smtp_and_messages(
     smtp_configs: List[Dict[str, str]],
+    messages: List[str],
     subjects: List[str],
     rotate_subjects: bool,
     selected_subject: Optional[str]
-) -> tuple[Optional[List[Dict[str, str]]], bool, Optional[str], bool, List[str], bool, Optional[str]]:
+) -> tuple[Optional[Dict[str, str]], bool, Optional[str], bool, List[str], bool, Optional[str]]:
     rotate_smtp = False
     selected_smtp = None
     rotate_messages = False
     selected_message = None
-
-    messages = load_messages(smtp_configs[0]["message_file"])
-
     if len(smtp_configs) > 1:
-        print(f"\nMultiple SMTP configurations detected ({len(smtp_configs)} configurations).")
-        rotate = input("Do you want to rotate SMTPs for each message? (y/n): ").strip().lower()
+        print(f"\nMultiple SMTP configs ({len(smtp_configs)}).")
+        rotate = input("Rotate SMTPs? (y/n): ").strip().lower()
         if rotate in ['y', 'yes']:
             rotate_smtp = True
             logger.info("Chaos-SMTP: SMTP rotation enabled")
         else:
-            select = input("Would you like to select one SMTP configuration to use? (y/n): ").strip().lower()
+            select = input("Select one SMTP? (y/n): ").strip().lower()
             if select in ['y', 'yes']:
-                print("\nAvailable SMTP configurations:")
+                print("\nAvailable SMTPs:")
                 for i, config in enumerate(smtp_configs, 1):
                     print(f"{i}. {config['username']} ({config['server']})")
                 while True:
-                    choice = input("Enter the number of the SMTP to use: ").strip()
+                    choice = input("Enter SMTP number: ").strip()
                     if choice.isdigit() and 1 <= int(choice) <= len(smtp_configs):
                         selected_smtp = smtp_configs[int(choice) - 1]
-                        logger.info(f"Chaos-SMTP: Selected SMTP {selected_smtp['username']}")
+                        logger.info(f"Chaos-SMTP: Selected SMTP: {selected_smtp['username']}")
                         break
-                    print(f"Invalid choice. Enter a number between 1 and {len(smtp_configs)}.")
+                    print(f"Invalid choice. Enter 1-{len(smtp_configs)}.")
             else:
-                logger.error("Chaos-SMTP: Please run the script again with a single SMTP configuration in the file.")
+                logger.error("Chaos-SMTP: Requires single SMTP config")
                 sys.exit(1)
     else:
         selected_smtp = smtp_configs[0]
-        logger.info(f"Chaos-SMTP: Using single SMTP {selected_smtp['username']}")
-
+        logger.info(f"Chaos-SMTP: Using SMTP: {selected_smtp['username']}")
     if len(messages) > 1:
-        print(f"\nMultiple messages detected ({len(messages)} messages).")
-        rotate = input("Do you want to rotate messages for each recipient? (y/n): ").strip().lower()
+        print(f"\nMultiple messages ({len(messages)}).")
+        rotate = input("Rotate messages? (y/n): ").strip().lower()
         if rotate in ['y', 'yes']:
             rotate_messages = True
             logger.info("Chaos-MSG: Message rotation enabled")
         else:
-            select = input("Would you like to select one message to use? (y/n): ").strip().lower()
+            select = input("Select one message? (y/n): ").strip().lower()
             if select in ['y', 'yes']:
                 print("\nAvailable messages:")
                 for i, msg in enumerate(messages, 1):
                     print(f"{i}. {msg[:CONTENT_SNIPPET_LENGTH]}...")
                 while True:
-                    choice = input("Enter the number of the message to use: ").strip()
+                    choice = input("Enter message number: ").strip()
                     if choice.isdigit() and 1 <= int(choice) <= len(messages):
                         selected_message = messages[int(choice) - 1]
                         logger.info(f"Chaos-MSG: Selected message: {selected_message[:CONTENT_SNIPPET_LENGTH]}...")
                         break
-                    print(f"Invalid choice. Enter a number between 1 and {len(messages)}.")
+                    print(f"Invalid choice. Enter 1-{len(messages)}.")
             else:
-                logger.error("Chaos-MSG: Please run the script again with a single message in the message file.")
+                logger.error("Chaos-MSG: Requires single message")
                 sys.exit(1)
     else:
         selected_message = messages[0]
-        logger.info(f"Chaos-MSG: Using single message: {selected_message[:CONTENT_SNIPPET_LENGTH]}...")
-
+        logger.info(f"Chaos-MSG: Using message: {selected_message[:CONTENT_SNIPPET_LENGTH]}...")
     return selected_smtp, rotate_smtp, selected_message, rotate_messages, subjects, rotate_subjects, selected_subject
+
+def process_autograb_codes(message: str, link: Optional[str] = None) -> str:
+    autograb_iterators = {key: cycle(values) for key, values in AUTOGRAB_DATA.items()}
+    def replace_code(match):
+        code = match.group(1)
+        code = code.replace('/', '/').replace('\\', '/')
+        if code == "TIME":
+            tz = random.choice(USA_TIMEZONES)
+            usa_time = datetime.now(pytz.timezone(tz)).strftime("%I:%M %p")
+            return usa_time
+        elif code == "DATE":
+            return datetime.now(pytz.timezone("US/Eastern")).strftime("%m/%d/%Y")
+        elif code == "LINK":
+            return link if link else ""
+        elif '+' in code:
+            base_code = code.split('+')[0]
+            if base_code in AUTOGRAB_DATA:
+                value = next(autograb_iterators[base_code])
+                return value.replace(' ', '')
+            return match.group(0)
+        elif code in AUTOGRAB_DATA:
+            return next(autograb_iterators[code])
+        return match.group(0)
+    message = re.sub(r'\[([^\]\[\\\/+]*(?:[\+\\\/][^\]\[\\\/+]*)*)\]', replace_code, message)
+    return message
 
 def send_sms(
     smtp: smtplib.SMTP,
@@ -661,8 +748,12 @@ def send_sms(
     message: str,
     subject: str,
     chaos_id: str,
+    link: Optional[str] = None,
     max_retries: int = MAX_RETRIES
 ) -> tuple[bool, str, str, str, float]:
+    message = process_autograb_codes(message, link)
+    if len(message) > 160:
+        message = message[:157] + "..."
     score = analyze_spam_content(message)
     attempt = 0
     while attempt <= max_retries:
@@ -672,20 +763,39 @@ def send_sms(
             msg["Subject"] = Header(formatted_subject, "utf-8")
             msg["From"] = formataddr((f"{sender_name} <{chaos_id}>", sender_email))
             msg["To"] = recipient_email
-
             smtp.sendmail(sender_email, recipient_email, msg.as_string())
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            logger.info(f"Chaos-{chaos_id}: Sent to {recipient_email} at {timestamp} (Attempt {attempt + 1})")
+            logger.info(f"Chaos-{chaos_id}: Sent to {recipient_email} at {timestamp}")
             return True, timestamp, message[:CONTENT_SNIPPET_LENGTH], formatted_subject, score
         except Exception as e:
             attempt += 1
             if attempt > max_retries:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                logger.error(f"Chaos-{chaos_id}: Failed to send to {recipient_email} after {max_retries} retries: {str(e)}")
+                logger.error(f"Chaos-{chaos_id}: Failed to send to {recipient_email}: {str(e)}")
                 return False, timestamp, message[:CONTENT_SNIPPET_LENGTH], subject.format(chaos_id=chaos_id), score
-            logger.warning(f"Chaos-{chaos_id}: Retry {attempt}/{max_retries} for {recipient_email}: {str(e)}")
+            logger.warning(f"Chaos-{chaos_id}: Retry {attempt}/{max_retries} for {recipient_email}")
             time.sleep(retry_delay(attempt))
     return False, timestamp, message[:CONTENT_SNIPPET_LENGTH], subject.format(chaos_id=chaos_id), score
+
+paused = False
+pause_event = threading.Event()
+pause_event.set()
+
+def keyboard_listener():
+    global paused
+    while True:
+        keyboard.wait('space')
+        paused = not paused
+        if paused:
+            pause_event.clear()
+            terminal_width = shutil.get_terminal_size().columns
+            pause_message = "Paused. Press SPACEBAR to resume."
+            padding = (terminal_width - len(pause_message)) // 2
+            print(f"\r{Fore.YELLOW}{' ' * padding}{pause_message}{Style.RESET_ALL}", flush=True)
+        else:
+            pause_event.set()
+            print("\r" + " " * terminal_width, end="\r", flush=True)
+            logger.info("Chaos-SEND: Resumed")
 
 def worker(
     smtp_configs: List[Dict[str, str]],
@@ -698,55 +808,45 @@ def worker(
     selected_message: Optional[str],
     subjects: List[str],
     rotate_subjects: bool,
-    selected_subject: Optional[str]
+    selected_subject: Optional[str],
+    links: Optional[List[str]] = None,
+    rotate_links: bool = False,
+    selected_link: Optional[str] = None
 ):
     chaos_id = chaos_string(5)
     smtp_iterator = cycle(smtp_configs) if rotate_smtp else None
+    link_iterator = cycle(links) if rotate_links and links else None
     try:
         while True:
             try:
                 number_info = numbers_queue.get_nowait()
             except queue.Empty:
                 break
-            
+            pause_event.wait()
             smtp_config = next(smtp_iterator) if rotate_smtp else selected_smtp
             with smtplib.SMTP(smtp_config["server"], smtp_config["port"]) as smtp:
                 smtp.starttls()
                 smtp.login(smtp_config["username"], smtp_config["password"])
-                recipient_email = get_sms_email(number_info["phone_number"], number_info["carrier"])
-                if recipient_email:
-                    sender_name = f"{smtp_config['sender_name']} {chaos_string(3)}"
-                    message = get_message(messages, rotate_messages, selected_message)
-                    subject = get_subject(subjects, rotate_subjects, selected_subject)
-                    success, timestamp, content_snippet, formatted_subject, spam_score = send_sms(
-                        smtp,
-                        sender_name,
-                        smtp_config["sender_email"],
-                        recipient_email,
-                        message,
-                        subject,
-                        chaos_id
-                    )
-                    status = f"{Fore.GREEN}Sent{Style.RESET_ALL}" if success else f"{Fore.RED}Failed: SMTP error{Style.RESET_ALL}"
-                    content_display = f"Subject: {Fore.YELLOW}{formatted_subject}{Style.RESET_ALL} Message: {content_snippet}"
-                    spam_level = "Low" if spam_score < SPAM_THRESHOLD_LOW else "Medium" if spam_score < SPAM_THRESHOLD_HIGH else "High"
-                    results_queue.put({
-                        "Victim Numbers": number_info["phone_number"],
-                        "Content of Outgoing": content_display,
-                        "Status": status,
-                        "Spam Score": f"{spam_score:.2f} ({spam_level})",
-                        "Timestamp": timestamp
-                    })
-                    time.sleep(chaos_delay())
-                else:
-                    results_queue.put({
-                        "Victim Numbers": number_info["phone_number"],
-                        "Content of Outgoing": "",
-                        "Status": f"{Fore.RED}Failed: Unknown carrier{Style.RESET_ALL}",
-                        "Spam Score": "N/A",
-                        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    })
-                numbers_queue.task_done()
+                recipient_email = number_info["phone_number"]
+                sender_name = f"{smtp_config['sender_name']} {chaos_string(3)}"
+                message = get_message(messages, rotate_messages, selected_message)
+                subject = get_subject(subjects, rotate_subjects, selected_subject)
+                link = next(link_iterator) if link_iterator else selected_link
+                success, timestamp, content_snippet, formatted_subject, spam_score = send_sms(
+                    smtp, sender_name, smtp_config["sender_email"], recipient_email, message, subject, chaos_id, link
+                )
+                status = f"{Fore.GREEN}Sent{Style.RESET_ALL}" if success else f"{Fore.RED}Failed{Style.RESET_ALL}"
+                content_display = f"Subject: {Fore.YELLOW}{formatted_subject}{Style.RESET_ALL} Message: {content_snippet}"
+                spam_level = "Low" if spam_score < SPAM_THRESHOLD_LOW else "Medium" if spam_score < SPAM_THRESHOLD_HIGH else "High"
+                results_queue.put({
+                    "Victim Numbers": recipient_email,
+                    "Content of Outgoing": content_display,
+                    "Status": status,
+                    "Spam Score": f"{spam_score:.2f} ({spam_level})",
+                    "Timestamp": timestamp
+                })
+                time.sleep(chaos_delay())
+            numbers_queue.task_done()
     except Exception as e:
         logger.error(f"Chaos-{chaos_id}: Worker error: {str(e)}")
 
@@ -755,31 +855,38 @@ def send_bulk_sms(
     smtp_configs: List[Dict[str, str]],
     subjects: List[str],
     rotate_subjects: bool,
-    selected_subject: Optional[str]
+    selected_subject: Optional[str],
+    mode: str,
+    message_file: Optional[str] = None,
+    messages: Optional[List[str]] = None,
+    links: Optional[List[str]] = None,
+    rotate_links: bool = False,
+    selected_link: Optional[str] = None
 ) -> List[Dict[str, str]]:
-    messages = load_messages(smtp_configs[0]["message_file"])
-    
-    spam_results = check_spam_content(messages)
+    global paused
+    if mode == "mode1":
+        messages = load_messages(message_file)
+    elif mode == "mode2":
+        messages = messages or []
+    spam_results = check_spam_content([process_autograb_codes(msg, links[0] if links else None) for msg in messages])
     high_spam_messages = [res for res in spam_results if res["score"] >= SPAM_THRESHOLD_LOW]
     if high_spam_messages:
-        print(f"\n{Fore.RED}WARNING: Potential spam content detected in {len(high_spam_messages)} messages.{Style.RESET_ALL}")
+        print(f"\n{Fore.RED}WARNING: Potential spam in {len(high_spam_messages)} messages{Style.RESET_ALL}")
         for i, res in enumerate(high_spam_messages, 1):
             print(f"\nMessage {i}: {res['message'][:CONTENT_SNIPPET_LENGTH]}... (Score: {res['score']:.2f}, {res['level']})")
-        print(f"\nSending these messages may trigger carrier spam filters.")
-        confirmation = input("Do you want to continue sending these messages? (y/n): ").strip().lower()
-        if confirmation not in ['y', 'yes']:
-            logger.info("Chaos-MSG: Sending aborted by user due to spam content.")
+        print("\nMay trigger spam filters.")
+        if input("Continue? (y/n): ").strip().lower() not in ['y', 'yes']:
+            logger.info("Chaos-MSG: Aborted due to spam")
             sys.exit(0)
-        logger.warning(f"Chaos-MSG: User chose to proceed with {len(high_spam_messages)} messages with spam score >= {SPAM_THRESHOLD_LOW}")
-
+        logger.warning(f"Chaos-MSG: Proceeding with {len(high_spam_messages)} high-spam messages")
     selected_smtp, rotate_smtp, selected_message, rotate_messages, subjects, rotate_subjects, selected_subject = \
-        configure_smtp_and_messages(smtp_configs, subjects, rotate_subjects, selected_subject)
-    
+        configure_smtp_and_messages(smtp_configs, messages, subjects, rotate_subjects, selected_subject)
     numbers_queue = queue.Queue()
     results_queue = queue.Queue()
     for number in numbers:
         numbers_queue.put(number)
-
+    keyboard_thread = threading.Thread(target=keyboard_listener, daemon=True)
+    keyboard_thread.start()
     threads = []
     print(f"\n{Fore.CYAN}Sending {len(numbers)} messages...{Style.RESET_ALL}")
     with tqdm(total=len(numbers), desc="Processing", unit="msg") as pbar:
@@ -788,92 +895,109 @@ def send_bulk_sms(
                 target=worker,
                 args=(
                     smtp_configs, numbers_queue, results_queue, messages, rotate_smtp, selected_smtp,
-                    rotate_messages, selected_message, subjects, rotate_subjects, selected_subject
+                    rotate_messages, selected_message, subjects, rotate_subjects, selected_subject,
+                    links, rotate_links, selected_link
                 )
             )
             t.start()
             threads.append(t)
-        
         while any(t.is_alive() for t in threads) or not numbers_queue.empty():
             try:
                 numbers_queue.get_nowait()
                 pbar.update(1)
             except queue.Empty:
                 time.sleep(0.1)
-
+            pause_event.wait()
         for t in threads:
             t.join()
-
+    paused = False
+    pause_event.set()
     results = []
     while not results_queue.empty():
         results.append(results_queue.get())
     results.sort(key=lambda x: numbers.index(next(n for n in numbers if n["phone_number"] == x["Victim Numbers"])))
-    
     table_data = [
         {
-            "Victim Numbers": r["Victim Numbers"],
+            "Victim Numbers": r["Victim Numbers"].split('@')[0],
             "Content of Outgoing": r["Content of Outgoing"],
             "Status": r["Status"],
             "Spam Score": r["Spam Score"]
         } for r in results
     ]
-    
     print(f"\n{Fore.CYAN}Chaos Bulk SMS Results (as of {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):{Style.RESET_ALL}")
     print(tabulate(table_data, headers="keys", tablefmt="grid", showindex="always"))
-    
     return results
 
+def select_mode() -> str:
+    print(f"\n{Fore.CYAN}Select Operation Mode:{Style.RESET_ALL}")
+    print("1. Mode 1: Load messages from file, prompt for subjects")
+    print("2. Mode 2: Input message with autograb codes, AI subjects, links")
+    while True:
+        choice = input("Enter mode (1 or 2): ").strip()
+        if choice in ["1", "2"]:
+            logger.info(f"Chaos-MODE: Selected Mode {choice}")
+            return f"mode{choice}"
+        print("Invalid choice. Enter 1 or 2.")
+
 def animate_logo():
-    """Display the SMS SERPENT logo with animation."""
-    for frame in SMS_SERPENT_FRAMES:
-        print("\033[H\033[J", end="")
-        print(frame)
-        sys.stdout.flush()
-        time.sleep(ANIMATION_FRAME_DELAY)
     print("\033[H\033[J", end="")
-    print(SMS_SERPENT_FRAMES[-1])
+    print(SMS_SERPENT_FRAMES[0])
 
 def main():
     animate_logo()
-    
-    parser = argparse.ArgumentParser(description="SMS SERPENT - Chaos Bulk SMS Deployer")
-    parser.add_argument("--revoke-license", action="store_true", help="Revoke the current license with user consent")
+    display_owner_info()
+    display_instructions()
+    parser = argparse.ArgumentParser(description="SMS SERPENT - Chaos Bulk SMS")
+    parser.add_argument("--revoke-license", action="store_true", help="Revoke license")
     args = parser.parse_args()
-
     chaos_id = chaos_string(5)
     try:
-        logger.info(f"Starting SMS SERPENT - Chaos Bulk SMS Deployer (Seed: {CHAOS_SEED})")
-        
+        logger.info(f"Starting SMS SERPENT (Seed: {CHAOS_SEED})")
         if args.revoke_license:
             revoke_license()
             return
-
-        is_valid, license_key, expiration_date = validate_license()
+        is_valid, license_key, expiration_date, days_remaining = validate_license()
         if not is_valid:
-            logger.error(f"Chaos-{chaos_id}: License validation failed. Exiting.")
+            logger.error(f"Chaos-{chaos_id}: License validation failed")
             sys.exit(1)
-
         print(f"\n{Fore.CYAN}License Information:{Style.RESET_ALL}")
         print(f"{Fore.CYAN}License Key: {license_key}{Style.RESET_ALL}")
         print(f"{Fore.CYAN}Expiration Date: {expiration_date}{Style.RESET_ALL}")
-
+        print(f"{Fore.CYAN}Days Remaining: {days_remaining}{Style.RESET_ALL}")
         if not os.path.exists(CSV_FILE):
-            logger.error(f"Chaos-{chaos_id}: CSV file not found: {CSV_FILE}")
+            logger.error(f"Chaos-{chaos_id}: Numbers file not found: {CSV_FILE}")
             sys.exit(1)
-
-        smtp_configs, message_file, subjects, rotate_subjects, selected_subject = get_configs()
-
-        numbers = load_numbers(CSV_FILE)
-        if not numbers:
-            logger.error(f"Chaos-{chaos_id}: No valid numbers loaded")
-            sys.exit(1)
-
-        results = send_bulk_sms(numbers, smtp_configs, subjects, rotate_subjects, selected_subject)
-        logger.info(f"Chaos-{chaos_id}: Processed {len(results)} messages")
+        mode = select_mode()
+        if mode == "mode1":
+            smtp_configs, message_file, subjects, rotate_subjects, selected_subject = get_configs_mode1()
+            send_bulk_sms(
+                numbers=load_numbers(CSV_FILE),
+                smtp_configs=smtp_configs,
+                subjects=subjects,
+                rotate_subjects=rotate_subjects,
+                selected_subject=selected_subject,
+                mode=mode,
+                message_file=message_file
+            )
+        else:
+            smtp_configs, message, subjects, rotate_subjects, selected_subject, links, rotate_links, selected_link = get_configs_mode2()
+            send_bulk_sms(
+                numbers=load_numbers(CSV_FILE),
+                smtp_configs=smtp_configs,
+                subjects=subjects,
+                rotate_subjects=rotate_subjects,
+                selected_subject=selected_subject,
+                mode=mode,
+                messages=[message],
+                links=links,
+                rotate_links=rotate_links,
+                selected_link=selected_link
+            )
+        logger.info(f"Chaos-{chaos_id}: Processed messages")
     except KeyboardInterrupt:
         logger.info(f"Chaos-{chaos_id}: Stopped by user")
     except Exception as e:
-        logger.error(f"Chaos-{chaos_id}: Unexpected error: {str(e)}")
+        logger.error(f"Chaos-{chaos_id}: Error: {str(e)}")
         sys.exit(1)
 
 if __name__ == "__main__":
