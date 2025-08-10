@@ -54,7 +54,7 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "keyboard"])
     import keyboard
 
-# Setup logging to file
+# Setup logging to file only (no console output)
 HIDDEN_DIR_NAME = ".chaos-serpent"
 HIDDEN_SUBDIR_NAME = "cache"
 LOG_FILE = None
@@ -73,25 +73,18 @@ def setup_logging():
             base_path = os.path.expanduser("~")
         LOG_FILE = os.path.join(base_path, HIDDEN_DIR_NAME, "serpent.log")
         os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(message)s',
-            handlers=[
-                logging.FileHandler(LOG_FILE),
-                logging.StreamHandler(sys.stdout)
-            ]
-        )
         logger = logging.getLogger(__name__)
-        logger.addFilter(NoChaosIDFilter())
+        logger.setLevel(logging.INFO)
+        # File handler for logging to serpent.log
+        file_handler = logging.FileHandler(LOG_FILE)
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+        logger.addHandler(file_handler)
+        # Null handler to prevent console output
+        logger.addHandler(logging.NullHandler())
         return logger
     except Exception as e:
         print(f"{Fore.RED}Chaos-LOG: Failed to set up logging: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
-
-# Filter to suppress Chaos ID in console
-class NoChaosIDFilter(logging.Filter):
-    def filter(self, record):
-        return not record.getMessage().startswith("Chaos-")
 
 logger = setup_logging()
 
@@ -577,7 +570,7 @@ def display_autograb_codes():
         {"Autograb Code": f"{Fore.YELLOW}[DATE]{Style.RESET_ALL}"},
         {"Autograb Code": f"{Fore.YELLOW}[LINK]{Style.RESET_ALL}"}
     ])
-    header = f"Autograb Codes (Mode 2):"
+    header = f"Autograb Codes (SERPENT AI MODE):"
     terminal_width = shutil.get_terminal_size().columns
     print(f"\n{Fore.CYAN}{' ' * ((terminal_width - len(header)) // 2)}{header}{Style.RESET_ALL}")
     print(tabulate(table_data, headers="keys", tablefmt="grid"))
@@ -681,7 +674,7 @@ def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
         print(f"{Fore.RED}Chaos-SMTP: Failed to load SMTP configs: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
-# Message Loading (Mode 1)
+# Message Loading (MODERN SENDER MODE)
 def load_messages(message_file: str) -> List[str]:
     try:
         if not os.path.exists(message_file):
@@ -1171,15 +1164,16 @@ def send_bulk_sms(
 
 def select_mode() -> str:
     if os.getenv("STARTUP_MODE") == "non_interactive":
-        logger.info("Selected Mode 2 (non-interactive)")
+        logger.info("Selected SERPENT AI MODE (non-interactive)")
         return "mode2"
     print(f"\n{Fore.CYAN}Select Operation Mode:{Style.RESET_ALL}")
-    print("1. Mode 1: Load messages from file, prompt for subjects")
-    print("2. Mode 2: Input message with autograb codes, AI subjects, links")
+    print("1. MODERN SENDER MODE: Load messages from file, prompt for subjects")
+    print("2. SERPENT AI MODE: Input message with autograb codes, AI subjects, links")
     while True:
         choice = input("Enter mode (1 or 2): ").strip()
         if choice in ["1", "2"]:
-            logger.info(f"Selected Mode {choice}")
+            mode_name = "MODERN SENDER MODE" if choice == "1" else "SERPENT AI MODE"
+            logger.info(f"Selected {mode_name}")
             return f"mode{choice}"
         print("Invalid choice. Enter 1 or 2.")
 
@@ -1203,12 +1197,6 @@ def main():
         chaos_id = chaos_string(5)
         # Format date and time in US Eastern Time for logging
         current_time = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d %I:%M %p")
-        # Display license verification prompt if license.key exists
-        if os.path.exists(LICENSE_FILE_PATH):
-            verification_message = "SMS SERPENT IS VERIFYING YOUR LICENSE KEY"
-            terminal_width = shutil.get_terminal_size().columns
-            padding = (terminal_width - len(verification_message)) // 2
-            print(f"\n{Fore.YELLOW}{Style.BRIGHT}{' ' * padding}{verification_message}{Style.RESET_ALL}")
         # Validate license
         is_valid, license_key, expiration_date, days_remaining = validate_license()
         if not is_valid:
@@ -1233,7 +1221,7 @@ def main():
             print(f"{Fore.RED}Chaos-FILE: Numbers file not found: {CSV_FILE}{Style.RESET_ALL}")
             sys.exit(1)
         mode = select_mode()
-        # Display autograb codes for Mode 2 in interactive mode
+        # Display autograb codes for SERPENT AI MODE in interactive mode
         if mode == "mode2" and os.getenv("STARTUP_MODE") != "non_interactive":
             display_autograb_codes()
         if mode == "mode1":
