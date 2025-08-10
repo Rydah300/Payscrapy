@@ -121,7 +121,7 @@ def install_missing_modules():
 
 install_missing_modules()
 
-# Autograb Data (unchanged)
+# Autograb Data
 AUTOGRAB_DATA = {
     "BANK": [
         "Chase", "Wells Fargo", "BofA", "U.S. Bank", "PNC", "Truist", "Regions", "TD Bank",
@@ -142,7 +142,7 @@ AUTOGRAB_DATA = {
 
 USA_TIMEZONES = ["US/Eastern", "US/Central", "US/Mountain", "US/Pacific"]
 
-# Configuration (unchanged)
+# Configuration
 CHAOS_SEED = random.randint(1, 1000000)
 random.seed(CHAOS_SEED)
 CSV_FILE = "numbers.txt"
@@ -159,7 +159,7 @@ MAX_RETRIES = 3
 RETRY_BASE_DELAY = 2
 ANIMATION_FRAME_DELAY = 0.5
 
-# Spam Filtering Configuration (unchanged)
+# Spam Filtering Configuration
 SPAM_KEYWORDS = {
     "free": 0.8, "win": 0.7, "winner": 0.7, "urgent": 0.6, "prize": 0.7,
     "lottery": 0.8, "guaranteed": 0.6, "cash": 0.7, "money": 0.7,
@@ -171,7 +171,7 @@ SPAM_KEYWORDS = {
 SPAM_THRESHOLD_LOW = 0.3
 SPAM_THRESHOLD_HIGH = 0.6
 
-# Carrier Gateways (unchanged)
+# Carrier Gateways
 CARRIER_GATEWAYS = {
     "Verizon": "vtext.com",
     "AT&T": "txt.att.net",
@@ -183,7 +183,7 @@ CARRIER_GATEWAYS = {
     "Virgin Mobile": "vmobl.com"
 }
 
-# Owner Information (unchanged)
+# Owner Information
 OWNER_INFO = [
     {"Field": f"{Fore.YELLOW}Owner Name{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}John Doe{Style.RESET_ALL}"},
     {"Field": f"{Fore.YELLOW}Email{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}john.doe@example.com{Style.RESET_ALL}"},
@@ -191,7 +191,7 @@ OWNER_INFO = [
     {"Field": f"{Fore.YELLOW}GitHub{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}@JohnDoeDev{Style.RESET_ALL}"}
 ]
 
-# ASCII Logo (unchanged)
+# ASCII Logo
 SMS_SERPENT_FRAMES = [
     f"{Fore.BLUE}         ____ __  __ _______     _______ ______ ______   _______ \n" \
     f"        / __ \\|  \\/  |__   __|   |__   __|  ____|  ____| |__   __|\n" \
@@ -295,7 +295,6 @@ def decrypt_data(ciphertext: bytes, key: bytes) -> Dict:
 
 # Licensing and Blacklist Functions
 def get_hardware_id() -> str:
-    # Modified to prioritize stable identifiers and log method used
     try:
         system = platform.system()
         if system == "Windows":
@@ -319,7 +318,6 @@ def get_hardware_id() -> str:
                     return hardware_id
                 except Exception as e:
                     logger.warning(f"Chaos-HWID: Registry failed: {str(e)}")
-            # Fallback to uuid.getnode() only, excluding getpass.getuser()
             hardware_id = f"uuid-{str(uuid.getnode())}"
             logger.info(f"Chaos-HWID: Using UUID fallback: {hardware_id}")
             return hardware_id
@@ -329,7 +327,6 @@ def get_hardware_id() -> str:
                     hardware_id = f.read().strip()
                     logger.info(f"Chaos-HWID: Using Linux machine-id: {hardware_id}")
                     return hardware_id
-                # Fallback to /var/lib/dbus/machine-id if /etc/machine-id fails
                 with open("/var/lib/dbus/machine-id", "r") as f:
                     hardware_id = f.read().strip()
                     logger.info(f"Chaos-HWID: Using Linux dbus machine-id: {hardware_id}")
@@ -364,14 +361,13 @@ def generate_license_key(hardware_id: str) -> str:
     return hashlib.sha256((hardware_id + SECRET_SALT).encode()).hexdigest()
 
 def save_license_key(license_key: str, issuance_date: str, hardware_id: str):
-    # Modified to store hardware_id in license file
     max_attempts = 3
     for attempt in range(max_attempts):
         try:
             license_data = {
                 "license_key": license_key,
                 "issuance_date": issuance_date,
-                "hardware_id": hardware_id  # Store hardware ID
+                "hardware_id": hardware_id
             }
             os.makedirs(os.path.dirname(LICENSE_FILE_PATH), exist_ok=True)
             with open(LICENSE_FILE_PATH, "w") as f:
@@ -387,7 +383,6 @@ def save_license_key(license_key: str, issuance_date: str, hardware_id: str):
             time.sleep(1)
 
 def load_license_key() -> Optional[Dict[str, str]]:
-    # Modified to return hardware_id
     try:
         if os.path.exists(LICENSE_FILE_PATH):
             with open(LICENSE_FILE_PATH, "r") as f:
@@ -465,11 +460,9 @@ def check_blacklist(hardware_id: str) -> bool:
         return False
 
 def validate_license() -> Tuple[bool, Optional[str], Optional[str], Optional[int]]:
-    # Modified to use stored hardware_id if available
     license_data = load_license_key()
     current_date = datetime.now()
     
-    # Check for existing license and use stored hardware_id
     if license_data and "hardware_id" in license_data:
         hardware_id = license_data["hardware_id"]
         logger.info(f"Chaos-LIC: Using stored hardware_id: {hardware_id}")
@@ -485,7 +478,7 @@ def validate_license() -> Tuple[bool, Optional[str], Optional[str], Optional[int
     if license_data is None:
         issuance_date = current_date.strftime("%Y-%m-%d %H:%M:%S")
         logger.info("Chaos-LIC: Generating new license")
-        save_license_key(expected_key, issuance_date, hardware_id)  # Store hardware_id
+        save_license_key(expected_key, issuance_date, hardware_id)
         expiration_date = current_date + timedelta(days=LICENSE_VALIDITY_DAYS)
         print(f"\n{Fore.CYAN}New license generated (expires {expiration_date}){Style.RESET_ALL}")
         return True, expected_key, expiration_date.strftime("%Y-%m-%d %H:%M:%S"), LICENSE_VALIDITY_DAYS
@@ -539,7 +532,7 @@ def revoke_license():
         logger.info("Chaos-LIC: Revocation cancelled")
         sys.exit(0)
 
-# Autograb Subjects (unchanged)
+# Autograb Subjects
 def autograb_subjects() -> List[str]:
     return [
         "Update",
@@ -571,6 +564,24 @@ def display_instructions():
     padding = (terminal_width - len(instructions)) // 2 if terminal_width > len(instructions) else 0
     print(f"\n{Fore.CYAN}{' ' * padding}{instructions}{Style.RESET_ALL}")
 
+def display_autograb_codes():
+    """
+    Display all autograb codes in a single-column tabular format with yellow text.
+    """
+    table_data = [
+        {"Autograb Code": f"{Fore.YELLOW}[{key}]{Style.RESET_ALL}"}
+        for key in AUTOGRAB_DATA.keys()
+    ]
+    table_data.extend([
+        {"Autograb Code": f"{Fore.YELLOW}[TIME]{Style.RESET_ALL}"},
+        {"Autograb Code": f"{Fore.YELLOW}[DATE]{Style.RESET_ALL}"},
+        {"Autograb Code": f"{Fore.YELLOW}[LINK]{Style.RESET_ALL}"}
+    ])
+    header = f"Autograb Codes (Mode 2):"
+    terminal_width = shutil.get_terminal_size().columns
+    print(f"\n{Fore.CYAN}{' ' * ((terminal_width - len(header)) // 2)}{header}{Style.RESET_ALL}")
+    print(tabulate(table_data, headers="keys", tablefmt="grid"))
+
 # Autograb Links Storage
 def save_autograb_links(links: List[str]):
     max_attempts = 3
@@ -599,7 +610,7 @@ def load_autograb_links() -> List[str]:
         logger.error(f"Chaos-FILE: Failed to load links: {str(e)}")
         return []
 
-# Spam Filtering (unchanged)
+# Spam Filtering
 def analyze_spam_content(message: str) -> float:
     score = 0.0
     message_lower = message.lower()
@@ -1190,7 +1201,12 @@ def main():
         if args.non_interactive:
             os.environ["STARTUP_MODE"] = "non_interactive"
         chaos_id = chaos_string(5)
-        logger.info(f"Starting SMS SERPENT (Seed: {CHAOS_SEED}) (ID: {chaos_id})")
+        # Format date and time in US Eastern Time
+        current_time = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d %I:%M %p")
+        # Log message with yellow, bold, and underlines
+        log_message = f"{Fore.YELLOW}{Style.BRIGHT}~~~~~~\nStarting SMS SERPENT\n{current_time}\n~~~~~~{Style.RESET_ALL}"
+        print(log_message)
+        logger.info(f"~~~~~~\nStarting SMS SERPENT\n{current_time}\n~~~~~~")
         if args.revoke_license:
             revoke_license()
             return
@@ -1207,6 +1223,9 @@ def main():
             print(f"{Fore.RED}Chaos-FILE: Numbers file not found: {CSV_FILE}{Style.RESET_ALL}")
             sys.exit(1)
         mode = select_mode()
+        # Display autograb codes for Mode 2 in interactive mode
+        if mode == "mode2" and os.getenv("STARTUP_MODE") != "non_interactive":
+            display_autograb_codes()
         if mode == "mode1":
             smtp_configs, message_file, subjects, rotate_subjects, selected_subject = get_configs_mode1()
             send_bulk_sms(
