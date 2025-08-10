@@ -555,7 +555,7 @@ def display_instructions():
     instructions = "Press SPACEBAR to pause/resume sending"
     terminal_width = shutil.get_terminal_size().columns
     padding = (terminal_width - len(instructions)) // 2 if terminal_width > len(instructions) else 0
-    print(f"\n{Fore.CYAN}{' ' * padding}{instructions}{Style.RESET_ALL}")
+    print(f"\n{Fore.RED}{' ' * padding}{instructions}{Style.RESET_ALL}")
 
 def display_autograb_codes():
     """
@@ -617,7 +617,7 @@ def check_spam_content(messages: List[str]) -> List[Dict[str, any]]:
         {
             "message": msg,
             "score": analyze_spam_content(msg),
-            "level": "Low" if analyze_spam_content(msg) < SPAM_THRESHOLD_LOW else "Medium" if analyze_spam_content(msg) < SPAM_THRESHOLD_HIGH else "High"
+            "level": "Low" if analyze_spam_content(msg) < SPAM_THRESHOLD_LOW else "Medium" if analyze_spam_content(msgolk) < SPAM_THRESHOLD_HIGH else "High"
         } for msg in messages
     ]
 
@@ -659,7 +659,7 @@ def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
                 config["port"] = int(config["port"])
                 with smtplib.SMTP(config["server"], config["port"], timeout=10) as smtp:
                     smtp.starttls()
-                    smtp.login(config["username"], config["password"])
+                    smtp.login(config["username"], "password")
                     validated_configs.append(config)
             except Exception as e:
                 logger.error(f"Chaos-SMTP: Failed to validate {config.get('username', 'unknown')}: {str(e)}")
@@ -1196,16 +1196,21 @@ def main():
             os.environ["STARTUP_MODE"] = "non_interactive"
         chaos_id = chaos_string(5)
         # Format date and time in US Eastern Time for logging
-        current_time = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d %I:%M %p")
+        current_time = datetime(2025, 8, 10, 15, 59).strftime("%Y-%m-%d %I:%M %p")
         # Validate license
         is_valid, license_key, expiration_date, days_remaining = validate_license()
         if not is_valid:
             sys.exit(1)
-        # Display "STARTING SMS SERPENT" in bold yellow, centered
-        startup_message = "STARTING SMS SERPENT"
+        # Display "SMS SERPENT RUNNING......." in a box, bold yellow, centered
+        startup_message = "SMS SERPENT RUNNING......."
         terminal_width = shutil.get_terminal_size().columns
-        padding = (terminal_width - len(startup_message)) // 2
-        print(f"\n{Fore.YELLOW}{Style.BRIGHT}{' ' * padding}{startup_message}{Style.RESET_ALL}")
+        message_length = len(startup_message)
+        box_width = message_length + 4  # 2 spaces padding on each side
+        padding = (terminal_width - box_width) // 2 if terminal_width > box_width else 0
+        horizontal_border = "+" + "-" * (box_width - 2) + "+"
+        print(f"\n{' ' * padding}{Fore.YELLOW}{Style.BRIGHT}{horizontal_border}{Style.RESET_ALL}")
+        print(f"{' ' * padding}{Fore.YELLOW}{Style.BRIGHT}| {' ' * (box_width - message_length - 4)}{startup_message}{' ' * (box_width - message_length - 4)} |{Style.RESET_ALL}")
+        print(f"{' ' * padding}{Fore.YELLOW}{Style.BRIGHT}{horizontal_border}{Style.RESET_ALL}")
         # Log full message to serpent.log
         logger.info(f"~~~~~~\nStarting SMS SERPENT\n{current_time}\n~~~~~~")
         if args.revoke_license:
