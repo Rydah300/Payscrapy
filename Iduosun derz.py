@@ -26,15 +26,16 @@ import argparse
 import re
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from tqdm import tqdm
-import keyboard
 import uuid
-import winreg  # For Windows registry-based hardware ID
-import netifaces  # For MAC address fallback
+import winreg
+import netifaces
+import getpass
 
 try:
     from colorama import init, Fore, Style
     init()
 except ImportError:
+    print("Installing colorama...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "colorama"])
     from colorama import init, Fore, Style
     init()
@@ -45,31 +46,59 @@ except ImportError:
     wmi = None
 
 try:
+    import keyboard
+except ImportError:
+    print("Installing keyboard...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "keyboard"])
+    import keyboard
+
+try:
     import netifaces
 except ImportError:
+    print("Installing netifaces...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "netifaces"])
     import netifaces
 
 # Setup logging to file
 HIDDEN_DIR_NAME = ".chaos-serpent"
 HIDDEN_SUBDIR_NAME = "cache"
-LOG_FILE = os.path.join(os.path.expanduser("~"), HIDDEN_DIR_NAME, "serpent.log")
-os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_FILE),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger(__name__)
+LOG_FILE = None
+
+def setup_logging():
+    global LOG_FILE
+    try:
+        system = platform.system()
+        if system == "Windows":
+            base_path = os.getenv("APPDATA", os.path.expanduser("~"))
+        elif system == "Linux":
+            base_path = os.path.expanduser("~/.cache")
+        elif system == "Darwin":
+            base_path = os.path.expanduser("~/Library/Caches")
+        else:
+            base_path = os.path.expanduser("~")
+        LOG_FILE = os.path.join(base_path, HIDDEN_DIR_NAME, "serpent.log")
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(message)s',
+            handlers=[
+                logging.FileHandler(LOG_FILE),
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
+        logger = logging.getLogger(__name__)
+        logger.addFilter(NoChaosIDFilter())
+        return logger
+    except Exception as e:
+        print(f"{Fore.RED}Chaos-LOG: Failed to set up logging: {str(e)}{Style.RESET_ALL}")
+        sys.exit(1)
 
 # Filter to suppress Chaos ID in console
 class NoChaosIDFilter(logging.Filter):
     def filter(self, record):
         return not record.getMessage().startswith("Chaos-")
-logger.addFilter(NoChaosIDFilter())
+
+logger = setup_logging()
 
 # Required modules
 REQUIRED_MODULES = ["tabulate", "colorama", "cryptography", "tqdm", "keyboard", "pytz", "netifaces"]
@@ -91,7 +120,8 @@ def install_missing_modules():
                 subprocess.check_call([sys.executable, "-m", "pip", "install", module])
                 logger.info(f"Installed {module}")
             except subprocess.CalledProcessError as e:
-                logger.error(f"Failed to install {module}: {str(e)}")
+                logger.error(f"Chaos-DEP: Failed to install {module}: {str(e)}")
+                print(f"{Fore.RED}Chaos-DEP: Failed to install {module}: {str(e)}{Style.RESET_ALL}")
                 sys.exit(1)
 
 install_missing_modules()
@@ -183,33 +213,39 @@ SMS_SERPENT_FRAMES = [
 # Hidden Folder Setup
 def get_hidden_folder_path() -> str:
     system = platform.system()
-    try:
-        if system == "Windows":
-            base_path = os.getenv("APPDATA")
-            hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME, HIDDEN_SUBDIR_NAME)
-        elif system == "Linux":
-            base_path = os.path.expanduser("~/.cache")
-            hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
-        elif system == "Darwin":
-            base_path = os.path.expanduser("~/Library/Caches")
-            hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
-        else:
-            logger.error("Chaos-HWID: Unsupported platform")
-            raise ValueError("Unsupported platform")
-        os.makedirs(hidden_folder, exist_ok=True)
-        if system == "Windows":
-            try:
-                import ctypes
-                ctypes.windll.kernel32.SetFileAttributesW(hidden_folder, 0x2)  # Set hidden
-                subprocess.check_call(['icacls', hidden_folder, '/inheritance:d'])
-                subprocess.check_call(['icacls', hidden_folder, '/grant:r', f'{os.getlogin()}:F'])
-            except Exception as e:
-                logger.warning(f"Chaos-FILE: Failed to set hidden attribute or permissions: {str(e)}")
-        logger.info(f"Created/using hidden folder: {hidden_folder}")
-        return hidden_folder
-    except Exception as e:
-        logger.error(f"Chaos-FILE: Failed to set up hidden folder: {str(e)}")
-        sys.exit(1)
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            if system == "Windows":
+                base_path = os.getenv("APPDATA", os.path.expanduser("~"))
+                hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME, HIDDEN_SUBDIR_NAME)
+            elif system == "Linux":
+                base_path = os.path.expanduser("~/.cache")
+                hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
+            elif system == "Darwin":
+                base_path = os.path.expanduser("~/Library/Caches")
+                hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
+            else:
+                logger.error("Chaos-FILE: Unsupported platform")
+                raise ValueError("Unsupported platform")
+            os.makedirs(hidden_folder, exist_ok=True)
+            if system == "Windows":
+                try:
+                    import ctypes
+                    ctypes.windll.kernel32.SetFileAttributesW(hidden_folder, 0x2)  # Set hidden
+                    subprocess.check_call(['icacls', hidden_folder, '/inheritance:d'], creationflags=0x0800)
+                    subprocess.check_call(['icacls', hidden_folder, '/grant:r', f'{getpass.getuser()}:F'], creationflags=0x0800)
+                except Exception as e:
+                    logger.warning(f"Chaos-FILE: Failed to set hidden attribute or permissions: {str(e)}")
+            logger.info(f"Created/using hidden folder: {hidden_folder}")
+            return hidden_folder
+        except Exception as e:
+            logger.warning(f"Chaos-FILE: Attempt {attempt + 1}/{max_attempts} failed to set up hidden folder: {str(e)}")
+            if attempt == max_attempts - 1:
+                logger.error(f"Chaos-FILE: Failed to set up hidden folder after {max_attempts} attempts: {str(e)}")
+                print(f"{Fore.RED}Chaos-FILE: Failed to create hidden folder: {str(e)}{Style.RESET_ALL}")
+                sys.exit(1)
+            time.sleep(1)
 
 HIDDEN_FOLDER = get_hidden_folder_path()
 LICENSE_FILE_PATH = os.path.join(HIDDEN_FOLDER, LICENSE_FILE)
@@ -219,20 +255,26 @@ AUTOGRAB_LINKS_FILE_PATH = os.path.join(HIDDEN_FOLDER, AUTOGRAB_LINKS_FILE)
 
 # Encryption Functions
 def generate_encryption_key() -> bytes:
-    try:
-        if os.path.exists(BLACKLIST_KEY_FILE_PATH):
-            with open(BLACKLIST_KEY_FILE_PATH, "rb") as f:
-                key = f.read()
-                if len(key) == 32:
-                    return key
-        key = os.urandom(32)
-        with open(BLACKLIST_KEY_FILE_PATH, "wb") as f:
-            f.write(key)
-        logger.info("Generated new encryption key")
-        return key
-    except Exception as e:
-        logger.error(f"Chaos-ENC: Failed to generate/load encryption key: {str(e)}")
-        sys.exit(1)
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            if os.path.exists(BLACKLIST_KEY_FILE_PATH):
+                with open(BLACKLIST_KEY_FILE_PATH, "rb") as f:
+                    key = f.read()
+                    if len(key) == 32:
+                        return key
+            key = os.urandom(32)
+            with open(BLACKLIST_KEY_FILE_PATH, "wb") as f:
+                f.write(key)
+            logger.info("Generated new encryption key")
+            return key
+        except Exception as e:
+            logger.warning(f"Chaos-ENC: Attempt {attempt + 1}/{max_attempts} failed to generate/load encryption key: {str(e)}")
+            if attempt == max_attempts - 1:
+                logger.error(f"Chaos-ENC: Failed to generate/load encryption key: {str(e)}")
+                print(f"{Fore.RED}Chaos-ENC: Failed to generate encryption key: {str(e)}{Style.RESET_ALL}")
+                sys.exit(1)
+            time.sleep(1)
 
 def encrypt_data(data: Dict, key: bytes) -> bytes:
     try:
@@ -243,6 +285,7 @@ def encrypt_data(data: Dict, key: bytes) -> bytes:
         return nonce + ciphertext
     except Exception as e:
         logger.error(f"Chaos-ENC: Failed to encrypt data: {str(e)}")
+        print(f"{Fore.RED}Chaos-ENC: Failed to encrypt data: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
 def decrypt_data(ciphertext: bytes, key: bytes) -> Dict:
@@ -273,44 +316,58 @@ def get_hardware_id() -> str:
             try:
                 with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\SystemInformation") as key:
                     system_uuid = winreg.QueryValueEx(key, "ComputerSystemProductUUID")[0]
-                mac = netifaces.ifaddresses(netifaces.interfaces()[0])[netifaces.AF_LINK][0]['addr'].replace(':', '')
+                interfaces = netifaces.interfaces()
+                mac = "nomac"
+                for iface in interfaces:
+                    try:
+                        mac = netifaces.ifaddresses(iface)[netifaces.AF_LINK][0]['addr'].replace(':', '')
+                        break
+                    except (KeyError, IndexError):
+                        continue
                 return f"reg-{system_uuid}-{mac}"
             except Exception as e:
                 logger.warning(f"Chaos-HWID: Registry/MAC failed: {str(e)}")
-                return f"uuid-{str(uuid.getnode())}"
+                return f"uuid-{str(uuid.getnode())}-{getpass.getuser()}"
         elif system == "Linux":
             try:
                 with open("/etc/machine-id", "r") as f:
                     return f.read().strip()
             except Exception as e:
                 logger.warning(f"Chaos-HWID: Linux machine-id failed: {str(e)}")
-                return f"uuid-{str(uuid.getnode())}"
+                return f"uuid-{str(uuid.getnode())}-{getpass.getuser()}"
         elif system == "Darwin":
             try:
                 return platform.node() + platform.mac_ver()[0]
             except Exception as e:
                 logger.warning(f"Chaos-HWID: macOS node failed: {str(e)}")
-                return f"uuid-{str(uuid.getnode())}"
+                return f"uuid-{str(uuid.getnode())}-{getpass.getuser()}"
         else:
             logger.warning("Chaos-HWID: Using UUID fallback for unsupported platform")
-            return f"uuid-{str(uuid.getnode())}"
+            return f"uuid-{str(uuid.getnode())}-{getpass.getuser()}"
     except Exception as e:
         logger.error(f"Chaos-HWID: Failed to get hardware ID: {str(e)}")
-        return f"uuid-{str(uuid.getnode())}"  # Ultimate fallback
+        return f"uuid-{str(uuid.getnode())}-{getpass.getuser()}"
 
 def generate_license_key(hardware_id: str) -> str:
     return hashlib.sha256((hardware_id + SECRET_SALT).encode()).hexdigest()
 
 def save_license_key(license_key: str, issuance_date: str):
-    try:
-        license_data = {"license_key": license_key, "issuance_date": issuance_date}
-        os.makedirs(os.path.dirname(LICENSE_FILE_PATH), exist_ok=True)
-        with open(LICENSE_FILE_PATH, "w") as f:
-            json.dump(license_data, f)
-        logger.info(f"License key saved to {LICENSE_FILE_PATH} (valid for {LICENSE_VALIDITY_DAYS} days)")
-    except Exception as e:
-        logger.error(f"Chaos-LIC: Failed to save license key: {str(e)}")
-        sys.exit(1)
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            license_data = {"license_key": license_key, "issuance_date": issuance_date}
+            os.makedirs(os.path.dirname(LICENSE_FILE_PATH), exist_ok=True)
+            with open(LICENSE_FILE_PATH, "w") as f:
+                json.dump(license_data, f)
+            logger.info(f"Chaos-LIC: License key saved to {LICENSE_FILE_PATH} (valid for {LICENSE_VALIDITY_DAYS} days)")
+            return
+        except Exception as e:
+            logger.warning(f"Chaos-LIC: Attempt {attempt + 1}/{max_attempts} failed to save license key: {str(e)}")
+            if attempt == max_attempts - 1:
+                logger.error(f"Chaos-LIC: Failed to save license key: {str(e)}")
+                print(f"{Fore.RED}Chaos-LIC: Failed to save license key: {str(e)}{Style.RESET_ALL}")
+                sys.exit(1)
+            time.sleep(1)
 
 def load_license_key() -> Optional[Dict[str, str]]:
     try:
@@ -323,24 +380,31 @@ def load_license_key() -> Optional[Dict[str, str]]:
         return None
 
 def create_blacklist_file(hardware_id: str, reason: str = "License expired"):
-    try:
-        key = generate_encryption_key()
-        blacklist_data = {
-            "blacklisted_ids": [hardware_id],
-            "blacklist_log": [{
-                "hardware_id": hardware_id,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "reason": reason
-            }]
-        }
-        ciphertext = encrypt_data(blacklist_data, key)
-        os.makedirs(os.path.dirname(BLACKLIST_FILE_PATH), exist_ok=True)
-        with open(BLACKLIST_FILE_PATH, "wb") as f:
-            f.write(ciphertext)
-        logger.info(f"Created blacklist file with {hardware_id}: {reason}")
-    except Exception as e:
-        logger.error(f"Chaos-BLACKLIST: Failed to create blacklist file: {str(e)}")
-        sys.exit(1)
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            key = generate_encryption_key()
+            blacklist_data = {
+                "blacklisted_ids": [hardware_id],
+                "blacklist_log": [{
+                    "hardware_id": hardware_id,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "reason": reason
+                }]
+            }
+            ciphertext = encrypt_data(blacklist_data, key)
+            os.makedirs(os.path.dirname(BLACKLIST_FILE_PATH), exist_ok=True)
+            with open(BLACKLIST_FILE_PATH, "wb") as f:
+                f.write(ciphertext)
+            logger.info(f"Chaos-BLACKLIST: Created blacklist file with {hardware_id}: {reason}")
+            return
+        except Exception as e:
+            logger.warning(f"Chaos-BLACKLIST: Attempt {attempt + 1}/{max_attempts} failed to create blacklist file: {str(e)}")
+            if attempt == max_attempts - 1:
+                logger.error(f"Chaos-BLACKLIST: Failed to create blacklist file: {str(e)}")
+                print(f"{Fore.RED}Chaos-BLACKLIST: Failed to create blacklist file: {str(e)}{Style.RESET_ALL}")
+                sys.exit(1)
+            time.sleep(1)
 
 def add_to_blacklist(hardware_id: str, reason: str = "License expired"):
     try:
@@ -360,9 +424,10 @@ def add_to_blacklist(hardware_id: str, reason: str = "License expired"):
             ciphertext = encrypt_data(blacklist_data, key)
             with open(BLACKLIST_FILE_PATH, "wb") as f:
                 f.write(ciphertext)
-            logger.info(f"Blacklisted {hardware_id}: {reason}")
+            logger.info(f"Chaos-BLACKLIST: Blacklisted {hardware_id}: {reason}")
     except Exception as e:
         logger.error(f"Chaos-BLACKLIST: Failed to blacklist: {str(e)}")
+        print(f"{Fore.RED}Chaos-BLACKLIST: Failed to blacklist: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
 def check_blacklist(hardware_id: str) -> bool:
@@ -468,20 +533,29 @@ def display_owner_info():
         print(' ' * padding + line)
 
 def display_instructions():
+    if os.getenv("STARTUP_MODE") == "non_interactive":
+        return
     instructions = "Press SPACEBAR to pause/resume sending"
     terminal_width = shutil.get_terminal_size().columns
     padding = (terminal_width - len(instructions)) // 2 if terminal_width > len(instructions) else 0
     print(f"\n{Fore.CYAN}{' ' * padding}{instructions}{Style.RESET_ALL}")
 
-# Autograb Links Storage (unchanged)
+# Autograb Links Storage
 def save_autograb_links(links: List[str]):
-    try:
-        with open(AUTOGRAB_LINKS_FILE_PATH, "w") as f:
-            json.dump({"links": links}, f)
-        logger.info(f"Saved {len(links)} links to {AUTOGRAB_LINKS_FILE_PATH}")
-    except Exception as e:
-        logger.error(f"Chaos-FILE: Failed to save links: {str(e)}")
-        sys.exit(1)
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            with open(AUTOGRAB_LINKS_FILE_PATH, "w") as f:
+                json.dump({"links": links}, f)
+            logger.info(f"Saved {len(links)} links to {AUTOGRAB_LINKS_FILE_PATH}")
+            return
+        except Exception as e:
+            logger.warning(f"Chaos-FILE: Attempt {attempt + 1}/{max_attempts} failed to save links: {str(e)}")
+            if attempt == max_attempts - 1:
+                logger.error(f"Chaos-FILE: Failed to save links: {str(e)}")
+                print(f"{Fore.RED}Chaos-FILE: Failed to save links: {str(e)}{Style.RESET_ALL}")
+                sys.exit(1)
+            time.sleep(1)
 
 def load_autograb_links() -> List[str]:
     try:
@@ -512,11 +586,12 @@ def check_spam_content(messages: List[str]) -> List[Dict[str, any]]:
         } for msg in messages
     ]
 
-# SMTP Configuration Loading (unchanged)
+# SMTP Configuration Loading
 def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
     try:
         if not os.path.exists(smtp_file):
             logger.error(f"Chaos-FILE: File not found: {smtp_file}")
+            print(f"{Fore.RED}Chaos-FILE: SMTP file not found: {smtp_file}{Style.RESET_ALL}")
             sys.exit(1)
         smtp_configs = []
         current_config = {}
@@ -536,6 +611,7 @@ def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
                 smtp_configs.append(current_config)
         if not smtp_configs:
             logger.error("Chaos-SMTP: No valid SMTP configs")
+            print(f"{Fore.RED}Chaos-SMTP: No valid SMTP configs{Style.RESET_ALL}")
             sys.exit(1)
         validated_configs = []
         for config in smtp_configs:
@@ -546,7 +622,7 @@ def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
                 continue
             try:
                 config["port"] = int(config["port"])
-                with smtplib.SMTP(config["server"], config["port"]) as smtp:
+                with smtplib.SMTP(config["server"], config["port"], timeout=10) as smtp:
                     smtp.starttls()
                     smtp.login(config["username"], config["password"])
                     validated_configs.append(config)
@@ -554,23 +630,27 @@ def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
                 logger.error(f"Chaos-SMTP: Failed to validate {config.get('username', 'unknown')}: {str(e)}")
         if not validated_configs:
             logger.error("Chaos-SMTP: No valid SMTP configs after validation")
+            print(f"{Fore.RED}Chaos-SMTP: No valid SMTP configs after validation{Style.RESET_ALL}")
             sys.exit(1)
         logger.info(f"Loaded {len(validated_configs)} SMTP configs")
         return validated_configs
     except Exception as e:
         logger.error(f"Chaos-SMTP: Failed to load configs: {str(e)}")
+        print(f"{Fore.RED}Chaos-SMTP: Failed to load SMTP configs: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
-# Message Loading (Mode 1, unchanged)
+# Message Loading (Mode 1)
 def load_messages(message_file: str) -> List[str]:
     try:
         if not os.path.exists(message_file):
             logger.error(f"Chaos-FILE: File not found: {message_file}")
+            print(f"{Fore.RED}Chaos-FILE: Message file not found: {message_file}{Style.RESET_ALL}")
             sys.exit(1)
         with open(message_file, "r", encoding="utf-8") as f:
             messages = [line.strip() for line in f if line.strip()]
         if not messages:
             logger.error("Chaos-MSG: No valid messages")
+            print(f"{Fore.RED}Chaos-MSG: No valid messages in {message_file}{Style.RESET_ALL}")
             sys.exit(1)
         invalid_messages = [msg for msg in messages if len(msg) > 160]
         if invalid_messages:
@@ -580,6 +660,7 @@ def load_messages(message_file: str) -> List[str]:
         return messages
     except Exception as e:
         logger.error(f"Chaos-MSG: Failed to load messages: {str(e)}")
+        print(f"{Fore.RED}Chaos-MSG: Failed to load messages: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
 def get_message(messages: List[str], rotate_messages: bool, selected_message: Optional[str] = None) -> str:
@@ -605,6 +686,7 @@ def load_numbers(txt_file: str) -> List[Dict[str, str]]:
     try:
         if not os.path.exists(txt_file):
             logger.error(f"Chaos-FILE: File not found: {txt_file}")
+            print(f"{Fore.RED}Chaos-FILE: Numbers file not found: {txt_file}{Style.RESET_ALL}")
             sys.exit(1)
         numbers = []
         valid_domains = list(CARRIER_GATEWAYS.values())
@@ -613,6 +695,7 @@ def load_numbers(txt_file: str) -> List[Dict[str, str]]:
             reader = csv.DictReader(f)
             if "phone_number" not in reader.fieldnames:
                 logger.error(f"Chaos-FILE: {txt_file} must have 'phone_number' column")
+                print(f"{Fore.RED}Chaos-FILE: {txt_file} must have 'phone_number' column{Style.RESET_ALL}")
                 sys.exit(1)
             for row in reader:
                 email = row["phone_number"].strip()
@@ -626,113 +709,132 @@ def load_numbers(txt_file: str) -> List[Dict[str, str]]:
                 numbers.append({"phone_number": email})
         if not numbers:
             logger.error("Chaos-NUM: No valid numbers")
+            print(f"{Fore.RED}Chaos-NUM: No valid numbers in {txt_file}{Style.RESET_ALL}")
             sys.exit(1)
         logger.info(f"Loaded {len(numbers)} numbers")
         return numbers
     except Exception as e:
         logger.error(f"Chaos-NUM: Error loading {txt_file}: {str(e)}")
+        print(f"{Fore.RED}Chaos-NUM: Failed to load numbers: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
 def get_configs_mode1() -> tuple[List[Dict[str, str]], str, List[str], bool, Optional[str]]:
-    smtp_file = input("\nSMTP Configuration File (e.g., smtp_configs.txt): ").strip()
-    while not smtp_file or not os.path.exists(smtp_file):
-        print(f"SMTP file '{smtp_file}' does not exist.")
-        smtp_file = input("SMTP Configuration File: ").strip()
-    smtp_configs = load_smtp_configs(smtp_file)
-    message_file = input("Message File (e.g., messages.txt): ").strip()
-    while not message_file or not os.path.exists(message_file):
-        print(f"Message file '{message_file}' does not exist.")
-        message_file = input("Message File: ").strip()
-    subjects = []
-    rotate_subjects = False
-    selected_subject = None
-    while not subjects:
-        subject_input = input("Email Subject(s) (comma-separated): ").strip()
-        if not subject_input:
-            print("Subject cannot be empty.")
-            continue
-        subjects = [s.strip() for s in subject_input.split(",") if s.strip()]
-        if len(subjects) > 1:
-            rotate = input("Rotate subjects? (y/n): ").strip().lower()
-            if rotate in ['y', 'yes']:
-                rotate_subjects = True
-                logger.info("Subject rotation enabled")
-            else:
-                select = input("Select one subject? (y/n): ").strip().lower()
-                if select in ['y', 'yes']:
-                    print("\nAvailable subjects:")
-                    for i, subj in enumerate(subjects, 1):
-                        print(f"{i}. {subj}")
-                    while True:
-                        choice = input("Enter subject number: ").strip()
-                        if choice.isdigit() and 1 <= int(choice) <= len(subjects):
-                            selected_subject = subjects[int(choice) - 1]
-                            logger.info(f"Selected subject: {selected_subject}")
-                            subjects = [selected_subject]
-                            break
-                        print(f"Invalid choice. Enter 1-{len(subjects)}.")
+    if os.getenv("STARTUP_MODE") == "non_interactive":
+        smtp_file = "smtp_configs.txt"
+        message_file = "messages.txt"
+        subjects = ["Default Subject"]
+        rotate_subjects = False
+        selected_subject = subjects[0]
+    else:
+        smtp_file = input("\nSMTP Configuration File (e.g., smtp_configs.txt): ").strip()
+        while not smtp_file or not os.path.exists(smtp_file):
+            print(f"SMTP file '{smtp_file}' does not exist.")
+            smtp_file = input("SMTP Configuration File: ").strip()
+        message_file = input("Message File (e.g., messages.txt): ").strip()
+        while not message_file or not os.path.exists(message_file):
+            print(f"Message file '{message_file}' does not exist.")
+            message_file = input("Message File: ").strip()
+        subjects = []
+        rotate_subjects = False
+        selected_subject = None
+        while not subjects:
+            subject_input = input("Email Subject(s) (comma-separated): ").strip()
+            if not subject_input:
+                print("Subject cannot be empty.")
+                continue
+            subjects = [s.strip() for s in subject_input.split(",") if s.strip()]
+            if len(subjects) > 1:
+                rotate = input("Rotate subjects? (y/n): ").strip().lower()
+                if rotate in ['y', 'yes']:
+                    rotate_subjects = True
+                    logger.info("Subject rotation enabled")
                 else:
-                    print("Enter a single subject.")
-                    subjects = []
+                    select = input("Select one subject? (y/n): ").strip().lower()
+                    if select in ['y', 'yes']:
+                        print("\nAvailable subjects:")
+                        for i, subj in enumerate(subjects, 1):
+                            print(f"{i}. {subj}")
+                        while True:
+                            choice = input("Enter subject number: ").strip()
+                            if choice.isdigit() and 1 <= int(choice) <= len(subjects):
+                                selected_subject = subjects[int(choice) - 1]
+                                logger.info(f"Selected subject: {selected_subject}")
+                                subjects = [selected_subject]
+                                break
+                            print(f"Invalid choice. Enter 1-{len(subjects)}.")
+                    else:
+                        print("Enter a single subject.")
+                        subjects = []
+    smtp_configs = load_smtp_configs(smtp_file)
     for config in smtp_configs:
         config["message_file"] = message_file
     return smtp_configs, message_file, subjects, rotate_subjects, selected_subject
 
 def get_configs_mode2() -> tuple[List[Dict[str, str]], str, List[str], bool, Optional[str], List[str], bool, Optional[str]]:
-    smtp_file = input("\nSMTP Configuration File (e.g., smtp_configs.txt): ").strip()
-    while not smtp_file or not os.path.exists(smtp_file):
-        print(f"SMTP file '{smtp_file}' does not exist.")
-        smtp_file = input("SMTP Configuration File: ").strip()
-    smtp_configs = load_smtp_configs(smtp_file)
-    print("\nAvailable autograb codes: [BANK], [AMOUNT], [CITY], [STORE], [TIME], [COMPANY], [DATE], [IP], [ZIP CODE], [LINK]")
-    print("Use + to join words (e.g., [BANK+NAME]), spaces as is, / or \\ as /")
-    print("Example: Transaction at [BANK+NAME] in [CITY] for [AMOUNT] on [DATE] at [TIME]. Details: [LINK]")
-    links = []
-    while not links:
-        link_input = input("Enter link(s) (comma-separated): ").strip()
-        links = [link.strip() for link in link_input.split(",") if link.strip()]
-        if not links:
-            print("At least one link is required.")
-            continue
+    if os.getenv("STARTUP_MODE") == "non_interactive":
+        smtp_file = "smtp_configs.txt"
+        message = "Transaction at [BANK+NAME] for [AMOUNT]. Details: [LINK]"
+        subjects = autograb_subjects()
+        rotate_subjects = True
+        selected_subject = None
+        links = ["https://example.com"]
         rotate_links = False
-        selected_link = None
-        if len(links) > 1:
-            rotate = input("Rotate links? (y/n): ").strip().lower()
-            if rotate in ['y', 'yes']:
-                rotate_links = True
-                logger.info("Link rotation enabled")
-            else:
-                select = input("Select one link? (y/n): ").strip().lower()
-                if select in ['y', 'yes']:
-                    print("\nAvailable links:")
-                    for i, link in enumerate(links, 1):
-                        print(f"{i}. {link}")
-                    while True:
-                        choice = input("Enter link number: ").strip()
-                        if choice.isdigit() and 1 <= int(choice) <= len(links):
-                            selected_link = links[int(choice) - 1]
-                            logger.info(f"Selected link: {selected_link}")
-                            links = [selected_link]
-                            break
-                        print(f"Invalid choice. Enter 1-{len(links)}.")
+        selected_link = links[0]
+    else:
+        smtp_file = input("\nSMTP Configuration File (e.g., smtp_configs.txt): ").strip()
+        while not smtp_file or not os.path.exists(smtp_file):
+            print(f"SMTP file '{smtp_file}' does not exist.")
+            smtp_file = input("SMTP Configuration File: ").strip()
+        print("\nAvailable autograb codes: [BANK], [AMOUNT], [CITY], [STORE], [TIME], [COMPANY], [DATE], [IP], [ZIP CODE], [LINK]")
+        print("Use + to join words (e.g., [BANK+NAME]), spaces as is, / or \\ as /")
+        print("Example: Transaction at [BANK+NAME] in [CITY] for [AMOUNT] on [DATE] at [TIME]. Details: [LINK]")
+        links = []
+        while not links:
+            link_input = input("Enter link(s) (comma-separated): ").strip()
+            links = [link.strip() for link in link_input.split(",") if link.strip()]
+            if not links:
+                print("At least one link is required.")
+                continue
+            rotate_links = False
+            selected_link = None
+            if len(links) > 1:
+                rotate = input("Rotate links? (y/n): ").strip().lower()
+                if rotate in ['y', 'yes']:
+                    rotate_links = True
+                    logger.info("Link rotation enabled")
                 else:
-                    print("Enter a single link.")
-                    links = []
-        else:
-            selected_link = links[0]
-            logger.info(f"Using single link: {selected_link}")
-    save_autograb_links(links)
-    message = ""
-    while not message:
-        message = input("Enter message (max 160 chars after replacements): ").strip()
-        if not message:
-            print("Message cannot be empty.")
-        elif len(message) > 160:
-            print("Message exceeds 160 chars. Shorten it.")
-            message = ""
-    subjects = autograb_subjects()
-    rotate_subjects = True
-    selected_subject = None
+                    select = input("Select one link? (y/n): ").strip().lower()
+                    if select in ['y', 'yes']:
+                        print("\nAvailable links:")
+                        for i, link in enumerate(links, 1):
+                            print(f"{i}. {link}")
+                        while True:
+                            choice = input("Enter link number: ").strip()
+                            if choice.isdigit() and 1 <= int(choice) <= len(links):
+                                selected_link = links[int(choice) - 1]
+                                logger.info(f"Selected link: {selected_link}")
+                                links = [selected_link]
+                                break
+                            print(f"Invalid choice. Enter 1-{len(links)}.")
+                    else:
+                        print("Enter a single link.")
+                        links = []
+            else:
+                selected_link = links[0]
+                logger.info(f"Using single link: {selected_link}")
+        save_autograb_links(links)
+        message = ""
+        while not message:
+            message = input("Enter message (max 160 chars after replacements): ").strip()
+            if not message:
+                print("Message cannot be empty.")
+            elif len(message) > 160:
+                print("Message exceeds 160 chars. Shorten it.")
+                message = ""
+        subjects = autograb_subjects()
+        rotate_subjects = True
+        selected_subject = None
+    smtp_configs = load_smtp_configs(smtp_file)
     return smtp_configs, message, subjects, rotate_subjects, selected_subject, links, rotate_links, selected_link
 
 def configure_smtp_and_messages(
@@ -746,58 +848,64 @@ def configure_smtp_and_messages(
     selected_smtp = None
     rotate_messages = False
     selected_message = None
-    if len(smtp_configs) > 1:
-        print(f"\nMultiple SMTP configs ({len(smtp_configs)}).")
-        rotate = input("Rotate SMTPs? (y/n): ").strip().lower()
-        if rotate in ['y', 'yes']:
-            rotate_smtp = True
-            logger.info("SMTP rotation enabled")
-        else:
-            select = input("Select one SMTP? (y/n): ").strip().lower()
-            if select in ['y', 'yes']:
-                print("\nAvailable SMTPs:")
-                for i, config in enumerate(smtp_configs, 1):
-                    print(f"{i}. {config['username']} ({config['server']})")
-                while True:
-                    choice = input("Enter SMTP number: ").strip()
-                    if choice.isdigit() and 1 <= int(choice) <= len(smtp_configs):
-                        selected_smtp = smtp_configs[int(choice) - 1]
-                        logger.info(f"Selected SMTP: {selected_smtp['username']}")
-                        break
-                    print(f"Invalid choice. Enter 1-{len(smtp_configs)}.")
-            else:
-                logger.error("Chaos-SMTP: Requires single SMTP config")
-                print(f"\n{Fore.RED}Requires single SMTP config{Style.RESET_ALL}")
-                sys.exit(1)
-    else:
+    if os.getenv("STARTUP_MODE") == "non_interactive":
         selected_smtp = smtp_configs[0]
-        logger.info(f"Using SMTP: {selected_smtp['username']}")
-    if len(messages) > 1:
-        print(f"\nMultiple messages ({len(messages)}).")
-        rotate = input("Rotate messages? (y/n): ").strip().lower()
-        if rotate in ['y', 'yes']:
-            rotate_messages = True
-            logger.info("Message rotation enabled")
-        else:
-            select = input("Select one message? (y/n): ").strip().lower()
-            if select in ['y', 'yes']:
-                print("\nAvailable messages:")
-                for i, msg in enumerate(messages, 1):
-                    print(f"{i}. {msg[:CONTENT_SNIPPET_LENGTH]}...")
-                while True:
-                    choice = input("Enter message number: ").strip()
-                    if choice.isdigit() and 1 <= int(choice) <= len(messages):
-                        selected_message = messages[int(choice) - 1]
-                        logger.info(f"Selected message: {selected_message[:CONTENT_SNIPPET_LENGTH]}...")
-                        break
-                    print(f"Invalid choice. Enter 1-{len(messages)}.")
-            else:
-                logger.error("Chaos-MSG: Requires single message")
-                print(f"\n{Fore.RED}Requires single message{Style.RESET_ALL}")
-                sys.exit(1)
-    else:
         selected_message = messages[0]
+        logger.info(f"Using SMTP: {selected_smtp['username']}")
         logger.info(f"Using message: {selected_message[:CONTENT_SNIPPET_LENGTH]}...")
+    else:
+        if len(smtp_configs) > 1:
+            print(f"\nMultiple SMTP configs ({len(smtp_configs)}).")
+            rotate = input("Rotate SMTPs? (y/n): ").strip().lower()
+            if rotate in ['y', 'yes']:
+                rotate_smtp = True
+                logger.info("SMTP rotation enabled")
+            else:
+                select = input("Select one SMTP? (y/n): ").strip().lower()
+                if select in ['y', 'yes']:
+                    print("\nAvailable SMTPs:")
+                    for i, config in enumerate(smtp_configs, 1):
+                        print(f"{i}. {config['username']} ({config['server']})")
+                    while True:
+                        choice = input("Enter SMTP number: ").strip()
+                        if choice.isdigit() and 1 <= int(choice) <= len(smtp_configs):
+                            selected_smtp = smtp_configs[int(choice) - 1]
+                            logger.info(f"Selected SMTP: {selected_smtp['username']}")
+                            break
+                        print(f"Invalid choice. Enter 1-{len(smtp_configs)}.")
+                else:
+                    logger.error("Chaos-SMTP: Requires single SMTP config")
+                    print(f"\n{Fore.RED}Requires single SMTP config{Style.RESET_ALL}")
+                    sys.exit(1)
+        else:
+            selected_smtp = smtp_configs[0]
+            logger.info(f"Using SMTP: {selected_smtp['username']}")
+        if len(messages) > 1:
+            print(f"\nMultiple messages ({len(messages)}).")
+            rotate = input("Rotate messages? (y/n): ").strip().lower()
+            if rotate in ['y', 'yes']:
+                rotate_messages = True
+                logger.info("Message rotation enabled")
+            else:
+                select = input("Select one message? (y/n): ").strip().lower()
+                if select in ['y', 'yes']:
+                    print("\nAvailable messages:")
+                    for i, msg in enumerate(messages, 1):
+                        print(f"{i}. {msg[:CONTENT_SNIPPET_LENGTH]}...")
+                    while True:
+                        choice = input("Enter message number: ").strip()
+                        if choice.isdigit() and 1 <= int(choice) <= len(messages):
+                            selected_message = messages[int(choice) - 1]
+                            logger.info(f"Selected message: {selected_message[:CONTENT_SNIPPET_LENGTH]}...")
+                            break
+                        print(f"Invalid choice. Enter 1-{len(messages)}.")
+                else:
+                    logger.error("Chaos-MSG: Requires single message")
+                    print(f"\n{Fore.RED}Requires single message{Style.RESET_ALL}")
+                    sys.exit(1)
+        else:
+            selected_message = messages[0]
+            logger.info(f"Using message: {selected_message[:CONTENT_SNIPPET_LENGTH]}...")
     return selected_smtp, rotate_smtp, selected_message, rotate_messages, subjects, rotate_subjects, selected_subject
 
 def process_autograb_codes(message: str, link: Optional[str] = None) -> str:
@@ -866,20 +974,25 @@ pause_event = threading.Event()
 pause_event.set()
 
 def keyboard_listener():
+    if os.getenv("STARTUP_MODE") == "non_interactive":
+        return
     global paused
-    while True:
-        keyboard.wait('space')
-        paused = not paused
-        if paused:
-            pause_event.clear()
-            terminal_width = shutil.get_terminal_size().columns
-            pause_message = "Paused. Press SPACEBAR to resume."
-            padding = (terminal_width - len(pause_message)) // 2
-            print(f"\r{Fore.YELLOW}{' ' * padding}{pause_message}{Style.RESET_ALL}", flush=True)
-        else:
-            pause_event.set()
-            print("\r" + " " * terminal_width, end="\r", flush=True)
-            logger.info("Resumed")
+    try:
+        while True:
+            keyboard.wait('space')
+            paused = not paused
+            if paused:
+                pause_event.clear()
+                terminal_width = shutil.get_terminal_size().columns
+                pause_message = "Paused. Press SPACEBAR to resume."
+                padding = (terminal_width - len(pause_message)) // 2
+                print(f"\r{Fore.YELLOW}{' ' * padding}{pause_message}{Style.RESET_ALL}", flush=True)
+            else:
+                pause_event.set()
+                print("\r" + " " * terminal_width, end="\r", flush=True)
+                logger.info("Resumed")
+    except Exception as e:
+        logger.error(f"Chaos-KEYBOARD: Keyboard listener failed: {str(e)}")
 
 def worker(
     smtp_configs: List[Dict[str, str]],
@@ -908,7 +1021,7 @@ def worker(
                 break
             pause_event.wait()
             smtp_config = next(smtp_iterator) if rotate_smtp else selected_smtp
-            with smtplib.SMTP(smtp_config["server"], smtp_config["port"]) as smtp:
+            with smtplib.SMTP(smtp_config["server"], smtp_config["port"], timeout=10) as smtp:
                 smtp.starttls()
                 smtp.login(smtp_config["username"], smtp_config["password"])
                 recipient_email = number_info["phone_number"]
@@ -954,7 +1067,7 @@ def send_bulk_sms(
         messages = messages or []
     spam_results = check_spam_content([process_autograb_codes(msg, links[0] if links else None) for msg in messages])
     high_spam_messages = [res for res in spam_results if res["score"] >= SPAM_THRESHOLD_LOW]
-    if high_spam_messages:
+    if high_spam_messages and os.getenv("STARTUP_MODE") != "non_interactive":
         print(f"\n{Fore.RED}WARNING: Potential spam in {len(high_spam_messages)} messages{Style.RESET_ALL}")
         for i, res in enumerate(high_spam_messages, 1):
             print(f"\nMessage {i}: {res['message'][:CONTENT_SNIPPET_LENGTH]}... (Score: {res['score']:.2f}, {res['level']})")
@@ -973,7 +1086,7 @@ def send_bulk_sms(
     keyboard_thread.start()
     threads = []
     print(f"\n{Fore.CYAN}Sending {len(numbers)} messages...{Style.RESET_ALL}")
-    with tqdm(total=len(numbers), desc="Processing", unit="msg") as pbar:
+    with tqdm(total=len(numbers), desc="Processing", unit="msg", disable=os.getenv("STARTUP_MODE") == "non_interactive") as pbar:
         for _ in range(min(MAX_THREADS, len(numbers))):
             t = threading.Thread(
                 target=worker,
@@ -1008,11 +1121,16 @@ def send_bulk_sms(
             "Spam Score": r["Spam Score"]
         } for r in results
     ]
-    print(f"\n{Fore.CYAN}Bulk SMS Results (as of {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):{Style.RESET_ALL}")
-    print(tabulate(table_data, headers="keys", tablefmt="grid", showindex="always"))
+    if os.getenv("STARTUP_MODE") != "non_interactive":
+        print(f"\n{Fore.CYAN}Bulk SMS Results (as of {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}):{Style.RESET_ALL}")
+        print(tabulate(table_data, headers="keys", tablefmt="grid", showindex="always"))
+    logger.info(f"Bulk SMS completed: {len(results)} messages processed")
     return results
 
 def select_mode() -> str:
+    if os.getenv("STARTUP_MODE") == "non_interactive":
+        logger.info("Selected Mode 2 (non-interactive)")
+        return "mode2"
     print(f"\n{Fore.CYAN}Select Operation Mode:{Style.RESET_ALL}")
     print("1. Mode 1: Load messages from file, prompt for subjects")
     print("2. Mode 2: Input message with autograb codes, AI subjects, links")
@@ -1024,18 +1142,23 @@ def select_mode() -> str:
         print("Invalid choice. Enter 1 or 2.")
 
 def animate_logo():
+    if os.getenv("STARTUP_MODE") == "non_interactive":
+        return
     print("\033[H\033[J", end="")
     print(SMS_SERPENT_FRAMES[0])
 
 def main():
-    animate_logo()
-    display_owner_info()
-    display_instructions()
-    parser = argparse.ArgumentParser(description="SMS SERPENT - Chaos Bulk SMS")
-    parser.add_argument("--revoke-license", action="store_true", help="Revoke license")
-    args = parser.parse_args()
-    chaos_id = chaos_string(5)
     try:
+        animate_logo()
+        display_owner_info()
+        display_instructions()
+        parser = argparse.ArgumentParser(description="SMS SERPENT - Chaos Bulk SMS")
+        parser.add_argument("--revoke-license", action="store_true", help="Revoke license")
+        parser.add_argument("--non-interactive", action="store_true", help="Run in non-interactive mode for startup")
+        args = parser.parse_args()
+        if args.non_interactive:
+            os.environ["STARTUP_MODE"] = "non_interactive"
+        chaos_id = chaos_string(5)
         logger.info(f"Starting SMS SERPENT (Seed: {CHAOS_SEED}) (ID: {chaos_id})")
         if args.revoke_license:
             revoke_license()
@@ -1043,13 +1166,14 @@ def main():
         is_valid, license_key, expiration_date, days_remaining = validate_license()
         if not is_valid:
             sys.exit(1)
-        print(f"\n{Fore.CYAN}License Information:{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}License Key: {license_key}{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}Expiration Date: {expiration_date}{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}Days Remaining: {days_remaining}{Style.RESET_ALL}")
+        if os.getenv("STARTUP_MODE") != "non_interactive":
+            print(f"\n{Fore.CYAN}License Information:{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}License Key: {license_key}{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}Expiration Date: {expiration_date}{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}Days Remaining: {days_remaining}{Style.RESET_ALL}")
         if not os.path.exists(CSV_FILE):
             logger.error(f"Chaos-FILE: Numbers file not found: {CSV_FILE}")
-            print(f"\n{Fore.RED}Numbers file not found: {CSV_FILE}{Style.RESET_ALL}")
+            print(f"{Fore.RED}Chaos-FILE: Numbers file not found: {CSV_FILE}{Style.RESET_ALL}")
             sys.exit(1)
         mode = select_mode()
         if mode == "mode1":
@@ -1084,7 +1208,7 @@ def main():
         sys.exit(0)
     except Exception as e:
         logger.error(f"Chaos-ERROR: Error: {str(e)} (ID: {chaos_id})")
-        print(f"\n{Fore.RED}Error: {str(e)}{Style.RESET_ALL}")
+        print(f"\n{Fore.RED}Chaos-ERROR: Error: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
 if __name__ == "__main__":
