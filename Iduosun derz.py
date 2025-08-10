@@ -1157,8 +1157,8 @@ def select_mode() -> str:
         logger.info("Selected SERPENT AI MODE (non-interactive)")
         return "mode2"
     print(f"\n{Fore.CYAN}Select Operation Mode:{Style.RESET_ALL}")
-    print("1. MODERN SENDER MODE: Load messages from file, prompt for subjects")
-    print("2. SERPENT AI MODE: Input message with autograb codes, AI subjects, links")
+    print("1. MODERN SENDER MODE Load messages from file, prompt subjects")
+    print("2. SERPENT AI MODE (AUTOGRAB MODE 4 SERPENT AI)")
     while True:
         choice = input("Enter mode (1 or 2): ").strip()
         if choice in ["1", "2"]:
@@ -1186,7 +1186,7 @@ def main():
             os.environ["STARTUP_MODE"] = "non_interactive"
         chaos_id = chaos_string(5)
         # Format date and time in US Eastern Time for logging
-        current_time = datetime(2025, 8, 10, 16, 43).strftime("%Y-%m-%d %I:%M %p")
+        current_time = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d %I:%M %p")
         # Validate license
         is_valid, license_key, expiration_date, days_remaining = validate_license()
         if not is_valid:
