@@ -1201,18 +1201,28 @@ def main():
         if args.non_interactive:
             os.environ["STARTUP_MODE"] = "non_interactive"
         chaos_id = chaos_string(5)
-        # Format date and time in US Eastern Time
+        # Format date and time in US Eastern Time for logging
         current_time = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d %I:%M %p")
-        # Log message with yellow, bold, and underlines
-        log_message = f"{Fore.YELLOW}{Style.BRIGHT}~~~~~~\nStarting SMS SERPENT\n{current_time}\n~~~~~~{Style.RESET_ALL}"
-        print(log_message)
+        # Display license verification prompt if license.key exists
+        if os.path.exists(LICENSE_FILE_PATH):
+            verification_message = "SMS SERPENT IS VERIFYING YOUR LICENSE KEY"
+            terminal_width = shutil.get_terminal_size().columns
+            padding = (terminal_width - len(verification_message)) // 2
+            print(f"\n{Fore.YELLOW}{Style.BRIGHT}{' ' * padding}{verification_message}{Style.RESET_ALL}")
+        # Validate license
+        is_valid, license_key, expiration_date, days_remaining = validate_license()
+        if not is_valid:
+            sys.exit(1)
+        # Display "STARTING SMS SERPENT" in bold yellow, centered
+        startup_message = "STARTING SMS SERPENT"
+        terminal_width = shutil.get_terminal_size().columns
+        padding = (terminal_width - len(startup_message)) // 2
+        print(f"\n{Fore.YELLOW}{Style.BRIGHT}{' ' * padding}{startup_message}{Style.RESET_ALL}")
+        # Log full message to serpent.log
         logger.info(f"~~~~~~\nStarting SMS SERPENT\n{current_time}\n~~~~~~")
         if args.revoke_license:
             revoke_license()
             return
-        is_valid, license_key, expiration_date, days_remaining = validate_license()
-        if not is_valid:
-            sys.exit(1)
         if os.getenv("STARTUP_MODE") != "non_interactive":
             print(f"\n{Fore.CYAN}License Information:{Style.RESET_ALL}")
             print(f"{Fore.CYAN}License Key: {license_key}{Style.RESET_ALL}")
