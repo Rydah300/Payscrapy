@@ -27,8 +27,6 @@ import re
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from tqdm import tqdm
 import uuid
-import winreg
-import netifaces
 import getpass
 
 try:
@@ -51,13 +49,6 @@ except ImportError:
     print("Installing keyboard...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "keyboard"])
     import keyboard
-
-try:
-    import netifaces
-except ImportError:
-    print("Installing netifaces...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "netifaces"])
-    import netifaces
 
 # Setup logging to file
 HIDDEN_DIR_NAME = ".chaos-serpent"
@@ -100,8 +91,8 @@ class NoChaosIDFilter(logging.Filter):
 
 logger = setup_logging()
 
-# Required modules
-REQUIRED_MODULES = ["tabulate", "colorama", "cryptography", "tqdm", "keyboard", "pytz", "netifaces"]
+# Required modules (Removed netifaces)
+REQUIRED_MODULES = ["tabulate", "colorama", "cryptography", "tqdm", "keyboard", "pytz"]
 if platform.system() == "Windows":
     REQUIRED_MODULES.append("wmi")
 
@@ -300,6 +291,7 @@ def decrypt_data(ciphertext: bytes, key: bytes) -> Dict:
 
 # Licensing and Blacklist Functions
 def get_hardware_id() -> str:
+    # Modified to skip netifaces and rely on UUID fallback
     try:
         system = platform.system()
         if system == "Windows":
@@ -309,43 +301,42 @@ def get_hardware_id() -> str:
                     cpu_id = "".join([x.ProcessorId for x in c.Win32_Processor() if x.ProcessorId]) or "nocpu"
                     mb_id = "".join([x.SerialNumber for x in c.Win32_BaseBoard() if x.SerialNumber]) or "nomb"
                     disk_id = "".join([x.SerialNumber for x in c.Win32_DiskDrive() if x.SerialNumber]) or "nodisk"
+                    logger.info("Chaos-HWID: Using WMI-based ID")
                     return f"{cpu_id}-{mb_id}-{disk_id}"
                 except Exception as e:
                     logger.warning(f"Chaos-HWID: WMI failed: {str(e)}")
-            # Fallback to registry and MAC address
             try:
                 with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\SystemInformation") as key:
                     system_uuid = winreg.QueryValueEx(key, "ComputerSystemProductUUID")[0]
-                interfaces = netifaces.interfaces()
-                mac = "nomac"
-                for iface in interfaces:
-                    try:
-                        mac = netifaces.ifaddresses(iface)[netifaces.AF_LINK][0]['addr'].replace(':', '')
-                        break
-                    except (KeyError, IndexError):
-                        continue
-                return f"reg-{system_uuid}-{mac}"
+                logger.info("Chaos-HWID: Using registry-based ID")
+                return f"reg-{system_uuid}-nomac"
             except Exception as e:
-                logger.warning(f"Chaos-HWID: Registry/MAC failed: {str(e)}")
+                logger.warning(f"Chaos-HWID: Registry failed: {str(e)}")
+                logger.info("Chaos-HWID: Falling back to UUID and username")
                 return f"uuid-{str(uuid.getnode())}-{getpass.getuser()}"
         elif system == "Linux":
             try:
                 with open("/etc/machine-id", "r") as f:
+                    logger.info("Chaos-HWID: Using Linux machine-id")
                     return f.read().strip()
             except Exception as e:
                 logger.warning(f"Chaos-HWID: Linux machine-id failed: {str(e)}")
+                logger.info("Chaos-HWID: Falling back to UUID and username")
                 return f"uuid-{str(uuid.getnode())}-{getpass.getuser()}"
         elif system == "Darwin":
             try:
+                logger.info("Chaos-HWID: Using macOS node-based ID")
                 return platform.node() + platform.mac_ver()[0]
             except Exception as e:
                 logger.warning(f"Chaos-HWID: macOS node failed: {str(e)}")
+                logger.info("Chaos-HWID: Falling back to UUID and username")
                 return f"uuid-{str(uuid.getnode())}-{getpass.getuser()}"
         else:
-            logger.warning("Chaos-HWID: Using UUID fallback for unsupported platform")
+            logger.warning("Chaos-HWID: Unsupported platform, using UUID fallback")
             return f"uuid-{str(uuid.getnode())}-{getpass.getuser()}"
     except Exception as e:
         logger.error(f"Chaos-HWID: Failed to get hardware ID: {str(e)}")
+        logger.info("Chaos-HWID: Using UUID and username fallback")
         return f"uuid-{str(uuid.getnode())}-{getpass.getuser()}"
 
 def generate_license_key(hardware_id: str) -> str:
