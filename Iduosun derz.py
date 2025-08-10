@@ -28,6 +28,10 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from tqdm import tqdm
 import uuid
 import getpass
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 try:
     from colorama import init, Fore, Style
@@ -91,7 +95,7 @@ class NoChaosIDFilter(logging.Filter):
 
 logger = setup_logging()
 
-# Required modules (Removed netifaces)
+# Required modules
 REQUIRED_MODULES = ["tabulate", "colorama", "cryptography", "tqdm", "keyboard", "pytz"]
 if platform.system() == "Windows":
     REQUIRED_MODULES.append("wmi")
@@ -291,7 +295,7 @@ def decrypt_data(ciphertext: bytes, key: bytes) -> Dict:
 
 # Licensing and Blacklist Functions
 def get_hardware_id() -> str:
-    # Modified to skip netifaces and rely on UUID fallback
+    # Modified to prioritize stable identifiers and log method used
     try:
         system = platform.system()
         if system == "Windows":
@@ -301,56 +305,78 @@ def get_hardware_id() -> str:
                     cpu_id = "".join([x.ProcessorId for x in c.Win32_Processor() if x.ProcessorId]) or "nocpu"
                     mb_id = "".join([x.SerialNumber for x in c.Win32_BaseBoard() if x.SerialNumber]) or "nomb"
                     disk_id = "".join([x.SerialNumber for x in c.Win32_DiskDrive() if x.SerialNumber]) or "nodisk"
-                    logger.info("Chaos-HWID: Using WMI-based ID")
-                    return f"{cpu_id}-{mb_id}-{disk_id}"
+                    hardware_id = f"{cpu_id}-{mb_id}-{disk_id}"
+                    logger.info(f"Chaos-HWID: Using WMI-based ID: {hardware_id}")
+                    return hardware_id
                 except Exception as e:
                     logger.warning(f"Chaos-HWID: WMI failed: {str(e)}")
-            try:
-                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\SystemInformation") as key:
-                    system_uuid = winreg.QueryValueEx(key, "ComputerSystemProductUUID")[0]
-                logger.info("Chaos-HWID: Using registry-based ID")
-                return f"reg-{system_uuid}-nomac"
-            except Exception as e:
-                logger.warning(f"Chaos-HWID: Registry failed: {str(e)}")
-                logger.info("Chaos-HWID: Falling back to UUID and username")
-                return f"uuid-{str(uuid.getnode())}-{getpass.getuser()}"
+            if winreg:
+                try:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\SystemInformation") as key:
+                        system_uuid = winreg.QueryValueEx(key, "ComputerSystemProductUUID")[0]
+                    hardware_id = f"reg-{system_uuid}"
+                    logger.info(f"Chaos-HWID: Using registry-based ID: {hardware_id}")
+                    return hardware_id
+                except Exception as e:
+                    logger.warning(f"Chaos-HWID: Registry failed: {str(e)}")
+            # Fallback to uuid.getnode() only, excluding getpass.getuser()
+            hardware_id = f"uuid-{str(uuid.getnode())}"
+            logger.info(f"Chaos-HWID: Using UUID fallback: {hardware_id}")
+            return hardware_id
         elif system == "Linux":
             try:
                 with open("/etc/machine-id", "r") as f:
-                    logger.info("Chaos-HWID: Using Linux machine-id")
-                    return f.read().strip()
+                    hardware_id = f.read().strip()
+                    logger.info(f"Chaos-HWID: Using Linux machine-id: {hardware_id}")
+                    return hardware_id
+                # Fallback to /var/lib/dbus/machine-id if /etc/machine-id fails
+                with open("/var/lib/dbus/machine-id", "r") as f:
+                    hardware_id = f.read().strip()
+                    logger.info(f"Chaos-HWID: Using Linux dbus machine-id: {hardware_id}")
+                    return hardware_id
             except Exception as e:
                 logger.warning(f"Chaos-HWID: Linux machine-id failed: {str(e)}")
-                logger.info("Chaos-HWID: Falling back to UUID and username")
-                return f"uuid-{str(uuid.getnode())}-{getpass.getuser()}"
+                hardware_id = f"uuid-{str(uuid.getnode())}"
+                logger.info(f"Chaos-HWID: Using UUID fallback: {hardware_id}")
+                return hardware_id
         elif system == "Darwin":
             try:
-                logger.info("Chaos-HWID: Using macOS node-based ID")
-                return platform.node() + platform.mac_ver()[0]
+                hardware_id = platform.node() + platform.mac_ver()[0]
+                logger.info(f"Chaos-HWID: Using macOS node-based ID: {hardware_id}")
+                return hardware_id
             except Exception as e:
                 logger.warning(f"Chaos-HWID: macOS node failed: {str(e)}")
-                logger.info("Chaos-HWID: Falling back to UUID and username")
-                return f"uuid-{str(uuid.getnode())}-{getpass.getuser()}"
+                hardware_id = f"uuid-{str(uuid.getnode())}"
+                logger.info(f"Chaos-HWID: Using UUID fallback: {hardware_id}")
+                return hardware_id
         else:
             logger.warning("Chaos-HWID: Unsupported platform, using UUID fallback")
-            return f"uuid-{str(uuid.getnode())}-{getpass.getuser()}"
+            hardware_id = f"uuid-{str(uuid.getnode())}"
+            logger.info(f"Chaos-HWID: Using UUID fallback: {hardware_id}")
+            return hardware_id
     except Exception as e:
         logger.error(f"Chaos-HWID: Failed to get hardware ID: {str(e)}")
-        logger.info("Chaos-HWID: Using UUID and username fallback")
-        return f"uuid-{str(uuid.getnode())}-{getpass.getuser()}"
+        hardware_id = f"uuid-{str(uuid.getnode())}"
+        logger.info(f"Chaos-HWID: Using UUID fallback: {hardware_id}")
+        return hardware_id
 
 def generate_license_key(hardware_id: str) -> str:
     return hashlib.sha256((hardware_id + SECRET_SALT).encode()).hexdigest()
 
-def save_license_key(license_key: str, issuance_date: str):
+def save_license_key(license_key: str, issuance_date: str, hardware_id: str):
+    # Modified to store hardware_id in license file
     max_attempts = 3
     for attempt in range(max_attempts):
         try:
-            license_data = {"license_key": license_key, "issuance_date": issuance_date}
+            license_data = {
+                "license_key": license_key,
+                "issuance_date": issuance_date,
+                "hardware_id": hardware_id  # Store hardware ID
+            }
             os.makedirs(os.path.dirname(LICENSE_FILE_PATH), exist_ok=True)
             with open(LICENSE_FILE_PATH, "w") as f:
                 json.dump(license_data, f)
-            logger.info(f"Chaos-LIC: License key saved to {LICENSE_FILE_PATH} (valid for {LICENSE_VALIDITY_DAYS} days)")
+            logger.info(f"Chaos-LIC: License key saved to {LICENSE_FILE_PATH} (valid for {LICENSE_VALIDITY_DAYS} days, hardware_id: {hardware_id})")
             return
         except Exception as e:
             logger.warning(f"Chaos-LIC: Attempt {attempt + 1}/{max_attempts} failed to save license key: {str(e)}")
@@ -361,6 +387,7 @@ def save_license_key(license_key: str, issuance_date: str):
             time.sleep(1)
 
 def load_license_key() -> Optional[Dict[str, str]]:
+    # Modified to return hardware_id
     try:
         if os.path.exists(LICENSE_FILE_PATH):
             with open(LICENSE_FILE_PATH, "r") as f:
@@ -438,19 +465,31 @@ def check_blacklist(hardware_id: str) -> bool:
         return False
 
 def validate_license() -> Tuple[bool, Optional[str], Optional[str], Optional[int]]:
-    hardware_id = get_hardware_id()
+    # Modified to use stored hardware_id if available
+    license_data = load_license_key()
+    current_date = datetime.now()
+    
+    # Check for existing license and use stored hardware_id
+    if license_data and "hardware_id" in license_data:
+        hardware_id = license_data["hardware_id"]
+        logger.info(f"Chaos-LIC: Using stored hardware_id: {hardware_id}")
+    else:
+        hardware_id = get_hardware_id()
+        logger.info(f"Chaos-LIC: Generated new hardware_id: {hardware_id}")
+    
     if check_blacklist(hardware_id):
         return False, None, None, None
+    
     expected_key = generate_license_key(hardware_id)
-    current_date = datetime.now()
-    license_data = load_license_key()
+    
     if license_data is None:
         issuance_date = current_date.strftime("%Y-%m-%d %H:%M:%S")
         logger.info("Chaos-LIC: Generating new license")
-        save_license_key(expected_key, issuance_date)
+        save_license_key(expected_key, issuance_date, hardware_id)  # Store hardware_id
         expiration_date = current_date + timedelta(days=LICENSE_VALIDITY_DAYS)
         print(f"\n{Fore.CYAN}New license generated (expires {expiration_date}){Style.RESET_ALL}")
         return True, expected_key, expiration_date.strftime("%Y-%m-%d %H:%M:%S"), LICENSE_VALIDITY_DAYS
+    
     stored_key = license_data.get("license_key")
     issuance_date_str = license_data.get("issuance_date")
     try:
@@ -465,7 +504,7 @@ def validate_license() -> Tuple[bool, Optional[str], Optional[str], Optional[int
             print(f"\n{Fore.RED}Chaos-LIC: License expired on {expiration_date}{Style.RESET_ALL}")
             return False, None, None, None
         if stored_key != expected_key:
-            logger.error("Chaos-LIC: Invalid license key")
+            logger.error(f"Chaos-LIC: Invalid license key (expected: {expected_key[:10]}..., got: {stored_key[:10]}...)")
             print(f"\n{Fore.RED}Chaos-LIC: Invalid license key{Style.RESET_ALL}")
             return False, None, None, None
         logger.info(f"Chaos-LIC: License valid (expires {expiration_date})")
@@ -484,7 +523,8 @@ def revoke_license():
     print("\nWARNING: Revoking license will disable the script")
     if input("Confirm revoke (y/n): ").strip().lower() in ['y', 'yes']:
         try:
-            hardware_id = get_hardware_id()
+            license_data = load_license_key()
+            hardware_id = license_data.get("hardware_id", get_hardware_id())
             add_to_blacklist(hardware_id, "License revoked")
             os.remove(LICENSE_FILE_PATH)
             print(f"\n{Fore.YELLOW}License revoked{Style.RESET_ALL}")
