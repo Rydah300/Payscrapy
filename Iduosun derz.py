@@ -27,6 +27,9 @@ import re
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from tqdm import tqdm
 import keyboard
+import uuid
+import winreg  # For Windows registry-based hardware ID
+import netifaces  # For MAC address fallback
 
 try:
     from colorama import init, Fore, Style
@@ -40,6 +43,12 @@ try:
     import wmi
 except ImportError:
     wmi = None
+
+try:
+    import netifaces
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "netifaces"])
+    import netifaces
 
 # Setup logging to file
 HIDDEN_DIR_NAME = ".chaos-serpent"
@@ -63,7 +72,9 @@ class NoChaosIDFilter(logging.Filter):
 logger.addFilter(NoChaosIDFilter())
 
 # Required modules
-REQUIRED_MODULES = ["tabulate", "colorama", "cryptography", "tqdm", "keyboard", "pytz"]
+REQUIRED_MODULES = ["tabulate", "colorama", "cryptography", "tqdm", "keyboard", "pytz", "netifaces"]
+if platform.system() == "Windows":
+    REQUIRED_MODULES.append("wmi")
 
 # Install missing modules
 def install_missing_modules():
@@ -73,11 +84,6 @@ def install_missing_modules():
             importlib.metadata.version(module)
         except importlib.metadata.PackageNotFoundError:
             missing_modules.append(module)
-    if platform.system() == "Windows":
-        try:
-            importlib.metadata.version("wmi")
-        except importlib.metadata.PackageNotFoundError:
-            missing_modules.append("wmi")
     if missing_modules:
         print(f"\n{Fore.CYAN}Installing missing modules: {', '.join(missing_modules)}{Style.RESET_ALL}")
         for module in missing_modules:
@@ -171,7 +177,7 @@ SMS_SERPENT_FRAMES = [
     f"{Fore.CYAN}     ~~~:---:~~~{Style.RESET_ALL}\n" \
     f"{Fore.CYAN}     ~~:---:~~~  S S S S S E R P E N T  ~~~:---:~~{Style.RESET_ALL}\n" \
     f"{Fore.MAGENTA}     ~~:---:~~~  HACKVERSE DOMINION MODE ~~~:---:~~{Style.RESET_ALL}\n" \
-    f"{Fore.CYAN}     ~~:---:~~~~~~~~~~~~~~~~~~~~~~~~~~~~~:---:~~{Style.RESET_ALL}"
+    f"{Fore.CYAN}     ~~:---:~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~:---:~~{Style.RESET_ALL}"
 ]
 
 # Hidden Folder Setup
@@ -188,22 +194,21 @@ def get_hidden_folder_path() -> str:
             base_path = os.path.expanduser("~/Library/Caches")
             hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
         else:
-            logger.error("Unsupported platform")
-            sys.exit(1)
+            logger.error("Chaos-HWID: Unsupported platform")
+            raise ValueError("Unsupported platform")
         os.makedirs(hidden_folder, exist_ok=True)
         if system == "Windows":
             try:
                 import ctypes
                 ctypes.windll.kernel32.SetFileAttributesW(hidden_folder, 0x2)  # Set hidden
-                # Set permissions to user-only
                 subprocess.check_call(['icacls', hidden_folder, '/inheritance:d'])
                 subprocess.check_call(['icacls', hidden_folder, '/grant:r', f'{os.getlogin()}:F'])
             except Exception as e:
-                logger.warning(f"Failed to set hidden attribute or permissions: {str(e)}")
+                logger.warning(f"Chaos-FILE: Failed to set hidden attribute or permissions: {str(e)}")
         logger.info(f"Created/using hidden folder: {hidden_folder}")
         return hidden_folder
     except Exception as e:
-        logger.error(f"Failed to set up hidden folder: {str(e)}")
+        logger.error(f"Chaos-FILE: Failed to set up hidden folder: {str(e)}")
         sys.exit(1)
 
 HIDDEN_FOLDER = get_hidden_folder_path()
@@ -226,7 +231,7 @@ def generate_encryption_key() -> bytes:
         logger.info("Generated new encryption key")
         return key
     except Exception as e:
-        logger.error(f"Failed to generate/load encryption key: {str(e)}")
+        logger.error(f"Chaos-ENC: Failed to generate/load encryption key: {str(e)}")
         sys.exit(1)
 
 def encrypt_data(data: Dict, key: bytes) -> bytes:
@@ -237,7 +242,7 @@ def encrypt_data(data: Dict, key: bytes) -> bytes:
         ciphertext = aesgcm.encrypt(nonce, json_data, None)
         return nonce + ciphertext
     except Exception as e:
-        logger.error(f"Failed to encrypt data: {str(e)}")
+        logger.error(f"Chaos-ENC: Failed to encrypt data: {str(e)}")
         sys.exit(1)
 
 def decrypt_data(ciphertext: bytes, key: bytes) -> Dict:
@@ -247,29 +252,51 @@ def decrypt_data(ciphertext: bytes, key: bytes) -> Dict:
         json_data = aesgcm.decrypt(nonce, ciphertext[12:], None)
         return json.loads(json_data.decode('utf-8'))
     except Exception as e:
-        logger.error(f"Failed to decrypt data: {str(e)}")
+        logger.error(f"Chaos-ENC: Failed to decrypt data: {str(e)}")
         return {"blacklisted_ids": [], "blacklist_log": []}
 
 # Licensing and Blacklist Functions
 def get_hardware_id() -> str:
     try:
-        if platform.system() == "Windows" and wmi:
-            c = wmi.WMI()
-            cpu_id = "".join([x.ProcessorId for x in c.Win32_Processor()]) or "nocpu"
-            mb_id = "".join([x.SerialNumber for x in c.Win32_BaseBoard()]) or "nomb"
-            disk_id = "".join([x.SerialNumber for x in c.Win32_DiskDrive()]) or "nodisk"
-            return f"{cpu_id}-{mb_id}-{disk_id}"
-        else:
-            if platform.system() == "Linux":
+        system = platform.system()
+        if system == "Windows":
+            if wmi:
+                try:
+                    c = wmi.WMI()
+                    cpu_id = "".join([x.ProcessorId for x in c.Win32_Processor() if x.ProcessorId]) or "nocpu"
+                    mb_id = "".join([x.SerialNumber for x in c.Win32_BaseBoard() if x.SerialNumber]) or "nomb"
+                    disk_id = "".join([x.SerialNumber for x in c.Win32_DiskDrive() if x.SerialNumber]) or "nodisk"
+                    return f"{cpu_id}-{mb_id}-{disk_id}"
+                except Exception as e:
+                    logger.warning(f"Chaos-HWID: WMI failed: {str(e)}")
+            # Fallback to registry and MAC address
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\SystemInformation") as key:
+                    system_uuid = winreg.QueryValueEx(key, "ComputerSystemProductUUID")[0]
+                mac = netifaces.ifaddresses(netifaces.interfaces()[0])[netifaces.AF_LINK][0]['addr'].replace(':', '')
+                return f"reg-{system_uuid}-{mac}"
+            except Exception as e:
+                logger.warning(f"Chaos-HWID: Registry/MAC failed: {str(e)}")
+                return f"uuid-{str(uuid.getnode())}"
+        elif system == "Linux":
+            try:
                 with open("/etc/machine-id", "r") as f:
                     return f.read().strip()
-            elif platform.system() == "Darwin":
+            except Exception as e:
+                logger.warning(f"Chaos-HWID: Linux machine-id failed: {str(e)}")
+                return f"uuid-{str(uuid.getnode())}"
+        elif system == "Darwin":
+            try:
                 return platform.node() + platform.mac_ver()[0]
-            else:
-                return platform.node() + platform.version()
+            except Exception as e:
+                logger.warning(f"Chaos-HWID: macOS node failed: {str(e)}")
+                return f"uuid-{str(uuid.getnode())}"
+        else:
+            logger.warning("Chaos-HWID: Using UUID fallback for unsupported platform")
+            return f"uuid-{str(uuid.getnode())}"
     except Exception as e:
-        logger.error(f"Failed to get hardware ID: {str(e)}")
-        sys.exit(1)
+        logger.error(f"Chaos-HWID: Failed to get hardware ID: {str(e)}")
+        return f"uuid-{str(uuid.getnode())}"  # Ultimate fallback
 
 def generate_license_key(hardware_id: str) -> str:
     return hashlib.sha256((hardware_id + SECRET_SALT).encode()).hexdigest()
@@ -277,12 +304,12 @@ def generate_license_key(hardware_id: str) -> str:
 def save_license_key(license_key: str, issuance_date: str):
     try:
         license_data = {"license_key": license_key, "issuance_date": issuance_date}
-        os.makedirs(os.path.dirname(LICENSE_FILE_PATH), exist_ok=True)  # Ensure folder exists
+        os.makedirs(os.path.dirname(LICENSE_FILE_PATH), exist_ok=True)
         with open(LICENSE_FILE_PATH, "w") as f:
             json.dump(license_data, f)
         logger.info(f"License key saved to {LICENSE_FILE_PATH} (valid for {LICENSE_VALIDITY_DAYS} days)")
     except Exception as e:
-        logger.error(f"Failed to save license key: {str(e)}")
+        logger.error(f"Chaos-LIC: Failed to save license key: {str(e)}")
         sys.exit(1)
 
 def load_license_key() -> Optional[Dict[str, str]]:
@@ -292,7 +319,7 @@ def load_license_key() -> Optional[Dict[str, str]]:
                 return json.load(f)
         return None
     except Exception as e:
-        logger.error(f"Failed to load license key: {str(e)}")
+        logger.error(f"Chaos-LIC: Failed to load license key: {str(e)}")
         return None
 
 def create_blacklist_file(hardware_id: str, reason: str = "License expired"):
@@ -307,12 +334,12 @@ def create_blacklist_file(hardware_id: str, reason: str = "License expired"):
             }]
         }
         ciphertext = encrypt_data(blacklist_data, key)
-        os.makedirs(os.path.dirname(BLACKLIST_FILE_PATH), exist_ok=True)  # Ensure folder exists
+        os.makedirs(os.path.dirname(BLACKLIST_FILE_PATH), exist_ok=True)
         with open(BLACKLIST_FILE_PATH, "wb") as f:
             f.write(ciphertext)
         logger.info(f"Created blacklist file with {hardware_id}: {reason}")
     except Exception as e:
-        logger.error(f"Failed to create blacklist file: {str(e)}")
+        logger.error(f"Chaos-BLACKLIST: Failed to create blacklist file: {str(e)}")
         sys.exit(1)
 
 def add_to_blacklist(hardware_id: str, reason: str = "License expired"):
@@ -335,7 +362,7 @@ def add_to_blacklist(hardware_id: str, reason: str = "License expired"):
                 f.write(ciphertext)
             logger.info(f"Blacklisted {hardware_id}: {reason}")
     except Exception as e:
-        logger.error(f"Failed to blacklist: {str(e)}")
+        logger.error(f"Chaos-BLACKLIST: Failed to blacklist: {str(e)}")
         sys.exit(1)
 
 def check_blacklist(hardware_id: str) -> bool:
@@ -347,11 +374,11 @@ def check_blacklist(hardware_id: str) -> bool:
             blacklist_data = decrypt_data(ciphertext, key)
             if hardware_id in blacklist_data.get("blacklisted_ids", []):
                 print(f"\n{Fore.RED}Chaos-LIC: PC blacklisted{Style.RESET_ALL}")
-                logger.error("PC blacklisted")
+                logger.error("Chaos-LIC: PC blacklisted")
                 return True
         return False
     except Exception as e:
-        logger.error(f"Failed to check blacklist: {str(e)}")
+        logger.error(f"Chaos-BLACKLIST: Failed to check blacklist: {str(e)}")
         return False
 
 def validate_license() -> Tuple[bool, Optional[str], Optional[str], Optional[int]]:
@@ -363,7 +390,7 @@ def validate_license() -> Tuple[bool, Optional[str], Optional[str], Optional[int
     license_data = load_license_key()
     if license_data is None:
         issuance_date = current_date.strftime("%Y-%m-%d %H:%M:%S")
-        logger.info("Generating new license")
+        logger.info("Chaos-LIC: Generating new license")
         save_license_key(expected_key, issuance_date)
         expiration_date = current_date + timedelta(days=LICENSE_VALIDITY_DAYS)
         print(f"\n{Fore.CYAN}New license generated (expires {expiration_date}){Style.RESET_ALL}")
@@ -375,28 +402,28 @@ def validate_license() -> Tuple[bool, Optional[str], Optional[str], Optional[int
         expiration_date = issuance_date + timedelta(days=LICENSE_VALIDITY_DAYS)
         days_remaining = (expiration_date - current_date).days
         if current_date > expiration_date:
-            logger.error(f"License expired on {expiration_date}")
-            create_blacklist_file(hardware_id)  # Create blacklist on expiration
+            logger.error(f"Chaos-LIC: License expired on {expiration_date}")
+            create_blacklist_file(hardware_id)
             if os.path.exists(LICENSE_FILE_PATH):
                 os.remove(LICENSE_FILE_PATH)
             print(f"\n{Fore.RED}Chaos-LIC: License expired on {expiration_date}{Style.RESET_ALL}")
             return False, None, None, None
         if stored_key != expected_key:
-            logger.error("Invalid license key")
+            logger.error("Chaos-LIC: Invalid license key")
             print(f"\n{Fore.RED}Chaos-LIC: Invalid license key{Style.RESET_ALL}")
             return False, None, None, None
-        logger.info(f"License valid (expires {expiration_date})")
+        logger.info(f"Chaos-LIC: License valid (expires {expiration_date})")
         print(f"\n{Fore.CYAN}License valid (expires {expiration_date}, {days_remaining} days remaining){Style.RESET_ALL}")
         return True, stored_key, expiration_date.strftime("%Y-%m-%d %H:%M:%S"), days_remaining
     except Exception as e:
-        logger.error(f"Invalid license format: {str(e)}")
+        logger.error(f"Chaos-LIC: Invalid license format: {str(e)}")
         print(f"\n{Fore.RED}Chaos-LIC: Invalid license format{Style.RESET_ALL}")
         return False, None, None, None
 
 def revoke_license():
     if not os.path.exists(LICENSE_FILE_PATH):
         print(f"\n{Fore.YELLOW}No license to revoke{Style.RESET_ALL}")
-        logger.info("No license to revoke")
+        logger.info("Chaos-LIC: No license to revoke")
         sys.exit(0)
     print("\nWARNING: Revoking license will disable the script")
     if input("Confirm revoke (y/n): ").strip().lower() in ['y', 'yes']:
@@ -405,15 +432,15 @@ def revoke_license():
             add_to_blacklist(hardware_id, "License revoked")
             os.remove(LICENSE_FILE_PATH)
             print(f"\n{Fore.YELLOW}License revoked{Style.RESET_ALL}")
-            logger.info("License revoked")
+            logger.info("Chaos-LIC: License revoked")
             sys.exit(0)
         except Exception as e:
-            logger.error(f"Failed to revoke: {str(e)}")
+            logger.error(f"Chaos-LIC: Failed to revoke: {str(e)}")
             print(f"\n{Fore.RED}Failed to revoke license: {str(e)}{Style.RESET_ALL}")
             sys.exit(1)
     else:
         print(f"\n{Fore.YELLOW}Revocation cancelled{Style.RESET_ALL}")
-        logger.info("Revocation cancelled")
+        logger.info("Chaos-LIC: Revocation cancelled")
         sys.exit(0)
 
 # Autograb Subjects (unchanged)
@@ -453,7 +480,7 @@ def save_autograb_links(links: List[str]):
             json.dump({"links": links}, f)
         logger.info(f"Saved {len(links)} links to {AUTOGRAB_LINKS_FILE_PATH}")
     except Exception as e:
-        logger.error(f"Failed to save links: {str(e)}")
+        logger.error(f"Chaos-FILE: Failed to save links: {str(e)}")
         sys.exit(1)
 
 def load_autograb_links() -> List[str]:
@@ -464,7 +491,7 @@ def load_autograb_links() -> List[str]:
                 return data.get("links", [])
         return []
     except Exception as e:
-        logger.error(f"Failed to load links: {str(e)}")
+        logger.error(f"Chaos-FILE: Failed to load links: {str(e)}")
         return []
 
 # Spam Filtering (unchanged)
@@ -489,7 +516,7 @@ def check_spam_content(messages: List[str]) -> List[Dict[str, any]]:
 def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
     try:
         if not os.path.exists(smtp_file):
-            logger.error(f"File not found: {smtp_file}")
+            logger.error(f"Chaos-FILE: File not found: {smtp_file}")
             sys.exit(1)
         smtp_configs = []
         current_config = {}
@@ -508,14 +535,14 @@ def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
             if current_config:
                 smtp_configs.append(current_config)
         if not smtp_configs:
-            logger.error("No valid SMTP configs")
+            logger.error("Chaos-SMTP: No valid SMTP configs")
             sys.exit(1)
         validated_configs = []
         for config in smtp_configs:
             required_fields = ["server", "port", "username", "password", "sender_name", "sender_email"]
             missing = [field for field in required_fields if field not in config or not config[field]]
             if missing:
-                logger.error(f"Missing fields {missing} for {config.get('username', 'unknown')}")
+                logger.error(f"Chaos-SMTP: Missing fields {missing} for {config.get('username', 'unknown')}")
                 continue
             try:
                 config["port"] = int(config["port"])
@@ -524,35 +551,35 @@ def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
                     smtp.login(config["username"], config["password"])
                     validated_configs.append(config)
             except Exception as e:
-                logger.error(f"Failed to validate {config.get('username', 'unknown')}: {str(e)}")
+                logger.error(f"Chaos-SMTP: Failed to validate {config.get('username', 'unknown')}: {str(e)}")
         if not validated_configs:
-            logger.error("No valid SMTP configs after validation")
+            logger.error("Chaos-SMTP: No valid SMTP configs after validation")
             sys.exit(1)
         logger.info(f"Loaded {len(validated_configs)} SMTP configs")
         return validated_configs
     except Exception as e:
-        logger.error(f"Failed to load configs: {str(e)}")
+        logger.error(f"Chaos-SMTP: Failed to load configs: {str(e)}")
         sys.exit(1)
 
 # Message Loading (Mode 1, unchanged)
 def load_messages(message_file: str) -> List[str]:
     try:
         if not os.path.exists(message_file):
-            logger.error(f"File not found: {message_file}")
+            logger.error(f"Chaos-FILE: File not found: {message_file}")
             sys.exit(1)
         with open(message_file, "r", encoding="utf-8") as f:
             messages = [line.strip() for line in f if line.strip()]
         if not messages:
-            logger.error("No valid messages")
+            logger.error("Chaos-MSG: No valid messages")
             sys.exit(1)
         invalid_messages = [msg for msg in messages if len(msg) > 160]
         if invalid_messages:
-            logger.error(f"{len(invalid_messages)} messages exceed 160 chars")
+            logger.error(f"Chaos-MSG: {len(invalid_messages)} messages exceed 160 chars")
             messages = [msg[:157] + "..." if len(msg) > 160 else msg for msg in messages]
         logger.info(f"Loaded {len(messages)} messages")
         return messages
     except Exception as e:
-        logger.error(f"Failed to load messages: {str(e)}")
+        logger.error(f"Chaos-MSG: Failed to load messages: {str(e)}")
         sys.exit(1)
 
 def get_message(messages: List[str], rotate_messages: bool, selected_message: Optional[str] = None) -> str:
@@ -577,7 +604,7 @@ def retry_delay(attempt: int, base_delay: float = RETRY_BASE_DELAY) -> float:
 def load_numbers(txt_file: str) -> List[Dict[str, str]]:
     try:
         if not os.path.exists(txt_file):
-            logger.error(f"File not found: {txt_file}")
+            logger.error(f"Chaos-FILE: File not found: {txt_file}")
             sys.exit(1)
         numbers = []
         valid_domains = list(CARRIER_GATEWAYS.values())
@@ -585,25 +612,25 @@ def load_numbers(txt_file: str) -> List[Dict[str, str]]:
         with open(txt_file, mode="r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             if "phone_number" not in reader.fieldnames:
-                logger.error(f"{txt_file} must have 'phone_number' column")
+                logger.error(f"Chaos-FILE: {txt_file} must have 'phone_number' column")
                 sys.exit(1)
             for row in reader:
                 email = row["phone_number"].strip()
                 if not re.match(email_regex, email):
-                    logger.warning(f"Invalid email format: {email}")
+                    logger.warning(f"Chaos-NUM: Invalid email format: {email}")
                     continue
                 domain = email.split('@')[1]
                 if domain not in valid_domains:
-                    logger.warning(f"Invalid domain for {email}")
+                    logger.warning(f"Chaos-NUM: Invalid domain for {email}")
                     continue
                 numbers.append({"phone_number": email})
         if not numbers:
-            logger.error("No valid numbers")
+            logger.error("Chaos-NUM: No valid numbers")
             sys.exit(1)
         logger.info(f"Loaded {len(numbers)} numbers")
         return numbers
     except Exception as e:
-        logger.error(f"Error loading {txt_file}: {str(e)}")
+        logger.error(f"Chaos-NUM: Error loading {txt_file}: {str(e)}")
         sys.exit(1)
 
 def get_configs_mode1() -> tuple[List[Dict[str, str]], str, List[str], bool, Optional[str]]:
@@ -739,7 +766,7 @@ def configure_smtp_and_messages(
                         break
                     print(f"Invalid choice. Enter 1-{len(smtp_configs)}.")
             else:
-                logger.error("Requires single SMTP config")
+                logger.error("Chaos-SMTP: Requires single SMTP config")
                 print(f"\n{Fore.RED}Requires single SMTP config{Style.RESET_ALL}")
                 sys.exit(1)
     else:
@@ -765,7 +792,7 @@ def configure_smtp_and_messages(
                         break
                     print(f"Invalid choice. Enter 1-{len(messages)}.")
             else:
-                logger.error("Requires single message")
+                logger.error("Chaos-MSG: Requires single message")
                 print(f"\n{Fore.RED}Requires single message{Style.RESET_ALL}")
                 sys.exit(1)
     else:
@@ -905,7 +932,7 @@ def worker(
                 time.sleep(chaos_delay())
             numbers_queue.task_done()
     except Exception as e:
-        logger.error(f"Worker error: {str(e)} (ID: {chaos_id})")
+        logger.error(f"Chaos-WORKER: Worker error: {str(e)} (ID: {chaos_id})")
 
 def send_bulk_sms(
     numbers: List[Dict[str, str]],
@@ -933,7 +960,7 @@ def send_bulk_sms(
             print(f"\nMessage {i}: {res['message'][:CONTENT_SNIPPET_LENGTH]}... (Score: {res['score']:.2f}, {res['level']})")
         print("\nMay trigger spam filters.")
         if input("Continue? (y/n): ").strip().lower() not in ['y', 'yes']:
-            logger.info("Aborted due to spam")
+            logger.info("Chaos-SMTP: Aborted due to spam")
             sys.exit(0)
         logger.warning(f"Proceeding with {len(high_spam_messages)} high-spam messages")
     selected_smtp, rotate_smtp, selected_message, rotate_messages, subjects, rotate_subjects, selected_subject = \
@@ -1021,7 +1048,7 @@ def main():
         print(f"{Fore.CYAN}Expiration Date: {expiration_date}{Style.RESET_ALL}")
         print(f"{Fore.CYAN}Days Remaining: {days_remaining}{Style.RESET_ALL}")
         if not os.path.exists(CSV_FILE):
-            logger.error(f"Numbers file not found: {CSV_FILE}")
+            logger.error(f"Chaos-FILE: Numbers file not found: {CSV_FILE}")
             print(f"\n{Fore.RED}Numbers file not found: {CSV_FILE}{Style.RESET_ALL}")
             sys.exit(1)
         mode = select_mode()
@@ -1052,11 +1079,11 @@ def main():
             )
         logger.info(f"Processed messages (ID: {chaos_id})")
     except KeyboardInterrupt:
-        logger.info(f"Stopped by user (ID: {chaos_id})")
+        logger.info(f"Chaos-USER: Stopped by user (ID: {chaos_id})")
         print(f"\n{Fore.YELLOW}Script stopped by user{Style.RESET_ALL}")
         sys.exit(0)
     except Exception as e:
-        logger.error(f"Error: {str(e)} (ID: {chaos_id})")
+        logger.error(f"Chaos-ERROR: Error: {str(e)} (ID: {chaos_id})")
         print(f"\n{Fore.RED}Error: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
