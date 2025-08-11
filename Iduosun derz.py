@@ -140,7 +140,7 @@ LICENSE_FILE = "license.key"
 BLACKLIST_FILE = "SerpentTargent.dat"
 BLACKLIST_KEY_FILE = "blacklist_key.key"
 AUTOGRAB_LINKS_FILE = "autograb_links.json"
-LINKS_FILE = "links.txt"  # New file for [LINKS] autograb code
+LINKS_FILE = "links.txt"
 SECRET_SALT = "HACKVERSE-DOMINION-2025"
 LICENSE_VALIDITY_DAYS = 30
 MAX_THREADS = 10
@@ -366,6 +366,7 @@ def generate_license_key(hardware_id: str) -> str:
     return hashlib.sha256((hardware_id + SECRET_SALT).encode()).hexdigest()
 
 def save_license_key(license_key: str, issuance_date: str, hardware_id: str):
+    global LICENSE_FILE_PATH  # Declare global to modify
     max_attempts = 3
     for attempt in range(max_attempts):
         try:
@@ -405,8 +406,7 @@ def save_license_key(license_key: str, issuance_date: str, hardware_id: str):
                     if os.path.exists(fallback_path):
                         logger.info(f"Chaos-LIC: License key saved to fallback {fallback_path}")
                         print(f"{Fore.YELLOW}Chaos-LIC: License key saved to fallback {fallback_path}{Style.RESET_ALL}")
-                        global LICENSE_FILE_PATH
-                        LICENSE_FILE_PATH = fallback_path
+                        LICENSE_FILE_PATH = fallback_path  # Update global variable
                         return
                     else:
                         logger.error(f"Chaos-LIC: Failed to save license key to fallback {fallback_path}")
@@ -605,7 +605,7 @@ def display_instructions():
     print(f"\n{Fore.RED}{' ' * padding}{instructions}{Style.RESET_ALL}")
 
 def display_autograb_codes():
-    autograb_codes = list(AUTOGRAB_DATA.keys()) + ["TIME", "DATE", "LINK", "LINKS", "VICTIM NUM"]  # Added LINKS
+    autograb_codes = list(AUTOGRAB_DATA.keys()) + ["TIME", "DATE", "LINK", "LINKS", "VICTIM NUM"]
     table_data = []
     for i in range(0, len(autograb_codes), 2):
         code1 = autograb_codes[i]
@@ -878,7 +878,7 @@ def get_configs_mode2() -> tuple[List[Dict[str, str]], str, List[str], bool, Opt
         subjects = autograb_subjects()
         rotate_subjects = True
         selected_subject = None
-        links = load_links(LINKS_FILE)  # Load from links.txt
+        links = load_links(LINKS_FILE)
         rotate_links = False
         selected_link = links[0]
     else:
@@ -1014,7 +1014,7 @@ def process_autograb_codes(message: str, link: Optional[str] = None, links: Opti
         code = match.group(1)
         code = code.replace('/', '/').replace('\\', '/')
         if code == "TIME":
-            return datetime.now(pytz.UTC).strftime("%I:%M:%S %p")  # Current GMT time
+            return datetime.now(pytz.UTC).strftime("%I:%M:%S %p")
         elif code == "DATE":
             return datetime.now(pytz.timezone("US/Eastern")).strftime("%m/%d/%Y")
         elif code == "LINK":
