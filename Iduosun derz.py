@@ -366,7 +366,7 @@ def generate_license_key(hardware_id: str) -> str:
     return hashlib.sha256((hardware_id + SECRET_SALT).encode()).hexdigest()
 
 def save_license_key(license_key: str, issuance_date: str, hardware_id: str):
-    global LICENSE_FILE_PATH  # Declare global to modify
+    global LICENSE_FILE_PATH
     max_attempts = 3
     for attempt in range(max_attempts):
         try:
@@ -389,7 +389,7 @@ def save_license_key(license_key: str, issuance_date: str, hardware_id: str):
                     saved_data = json.load(f)
                 if saved_data == license_data:
                     logger.info(f"Chaos-LIC: License key saved to {LICENSE_FILE_PATH} (valid for {LICENSE_VALIDITY_DAYS} days, hardware_id: {hardware_id})")
-                    print(f"{Fore.GREEN}Chaos-LIC: License key saved to {LICENSE_FILE_PATH}{Style.RESET_ALL}")
+                    print(f"{Fore.GREEN}Chaos-LIC: License key saved successfully{Style.RESET_ALL}")
                     return
                 else:
                     logger.warning(f"Chaos-LIC: License file corrupted during write: {LICENSE_FILE_PATH}")
@@ -405,8 +405,8 @@ def save_license_key(license_key: str, issuance_date: str, hardware_id: str):
                         json.dump(license_data, f, indent=2)
                     if os.path.exists(fallback_path):
                         logger.info(f"Chaos-LIC: License key saved to fallback {fallback_path}")
-                        print(f"{Fore.YELLOW}Chaos-LIC: License key saved to fallback {fallback_path}{Style.RESET_ALL}")
-                        LICENSE_FILE_PATH = fallback_path  # Update global variable
+                        print(f"{Fore.YELLOW}Chaos-LIC: License key saved to fallback location{Style.RESET_ALL}")
+                        LICENSE_FILE_PATH = fallback_path
                         return
                     else:
                         logger.error(f"Chaos-LIC: Failed to save license key to fallback {fallback_path}")
@@ -489,7 +489,7 @@ def check_blacklist(hardware_id: str) -> bool:
             if hardware_id in blacklist_data.get("blacklisted_ids", []):
                 print(f"\n{Fore.RED}LICENSE HAS BEEN REVOKED OR INVALID KINDLY CONTACT TOOLS OWNER THANK U!!!{Style.RESET_ALL}")
                 logger.error("Chaos-LIC: PC blacklisted")
-                time.sleep(5)  # Wait 5 seconds before exiting
+                time.sleep(5)
                 sys.exit(1)
         return False
     except Exception as e:
@@ -532,12 +532,12 @@ def validate_license() -> Tuple[bool, Optional[str], Optional[str], Optional[int
             if os.path.exists(LICENSE_FILE_PATH):
                 os.remove(LICENSE_FILE_PATH)
             print(f"\n{Fore.RED}LICENSE HAS BEEN REVOKED OR INVALID KINDLY CONTACT TOOLS OWNER THANK U!!!{Style.RESET_ALL}")
-            time.sleep(5)  # Wait 5 seconds before exiting
+            time.sleep(5)
             return False, None, None, None
         if stored_key != expected_key:
             logger.error(f"Chaos-LIC: Invalid license key (expected: {expected_key[:10]}..., got: {stored_key[:10]}...)")
             print(f"\n{Fore.RED}LICENSE HAS BEEN REVOKED OR INVALID KINDLY CONTACT TOOLS OWNER THANK U!!!{Style.RESET_ALL}")
-            time.sleep(5)  # Wait 5 seconds before exiting
+            time.sleep(5)
             return False, None, None, None
         logger.info(f"Chaos-LIC: License valid (expires {expiration_date})")
         print(f"\n{Fore.LIGHTBLUE_EX}License valid (expires {expiration_date}, {days_remaining} days remaining){Style.RESET_ALL}")
@@ -545,7 +545,7 @@ def validate_license() -> Tuple[bool, Optional[str], Optional[str], Optional[int
     except Exception as e:
         logger.error(f"Chaos-LIC: Invalid license format: {str(e)}")
         print(f"\n{Fore.RED}LICENSE HAS BEEN REVOKED OR INVALID KINDLY CONTACT TOOLS OWNER THANK U!!!{Style.RESET_ALL}")
-        time.sleep(5)  # Wait 5 seconds before exiting
+        time.sleep(5)
         return False, None, None, None
 
 def revoke_license():
@@ -1287,7 +1287,6 @@ def main():
             print(f"{Fore.LIGHTBLUE_EX}License Key: {license_key}{Style.RESET_ALL}")
             print(f"{Fore.LIGHTBLUE_EX}Expiration Date: {expiration_date}{Style.RESET_ALL}")
             print(f"{Fore.LIGHTBLUE_EX}Days Remaining: {days_remaining}{Style.RESET_ALL}")
-            print(f"{Fore.LIGHTBLUE_EX}License File Location: {LICENSE_FILE_PATH}{Style.RESET_ALL}")
 
         if not os.path.exists(CSV_FILE):
             logger.error(f"Chaos-FILE: Numbers file not found: {CSV_FILE}")
