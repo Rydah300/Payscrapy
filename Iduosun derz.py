@@ -140,6 +140,7 @@ LICENSE_FILE = "license.key"
 BLACKLIST_FILE = "SerpentTargent.dat"
 BLACKLIST_KEY_FILE = "blacklist_key.key"
 AUTOGRAB_LINKS_FILE = "autograb_links.json"
+LINKS_FILE = "links.txt"  # New file for [LINKS] autograb code
 SECRET_SALT = "HACKVERSE-DOMINION-2025"
 LICENSE_VALIDITY_DAYS = 30
 MAX_THREADS = 10
@@ -211,9 +212,13 @@ def get_hidden_folder_path() -> str:
                 base_path = os.path.expanduser("~/Library/Caches")
                 hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
             else:
-                logger.error("Chaos-FILE: Unsupported platform")
-                raise ValueError("Unsupported platform")
+                base_path = os.path.expanduser("~")
+                hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
             os.makedirs(hidden_folder, exist_ok=True)
+            test_file = os.path.join(hidden_folder, "test_write")
+            with open(test_file, "w") as f:
+                f.write("test")
+            os.remove(test_file)
             if system == "Windows":
                 try:
                     import ctypes
@@ -221,15 +226,25 @@ def get_hidden_folder_path() -> str:
                     subprocess.check_call(['icacls', hidden_folder, '/inheritance:d'], creationflags=0x0800)
                     subprocess.check_call(['icacls', hidden_folder, '/grant:r', f'{getpass.getuser()}:F'], creationflags=0x0800)
                 except Exception as e:
-                    logger.warning(f"Chaos-FILE: Failed to set hidden attribute or permissions: {str(e)}")
+                    logger.warning(f"Chaos-FILE: Failed to set Windows hidden attribute or permissions: {str(e)}")
             logger.info(f"Created/using hidden folder: {hidden_folder}")
             return hidden_folder
         except Exception as e:
             logger.warning(f"Chaos-FILE: Attempt {attempt + 1}/{max_attempts} failed to set up hidden folder: {str(e)}")
             if attempt == max_attempts - 1:
-                logger.error(f"Chaos-FILE: Failed to set up hidden folder after {max_attempts} attempts: {str(e)}")
-                print(f"{Fore.RED}Chaos-FILE: Failed to create hidden folder: {str(e)}{Style.RESET_ALL}")
-                sys.exit(1)
+                fallback_path = os.path.join(os.path.expanduser("~"), HIDDEN_DIR_NAME)
+                try:
+                    os.makedirs(fallback_path, exist_ok=True)
+                    test_file = os.path.join(fallback_path, "test_write")
+                    with open(test_file, "w") as f:
+                        f.write("test")
+                    os.remove(test_file)
+                    logger.info(f"Chaos-FILE: Using fallback folder: {fallback_path}")
+                    return fallback_path
+                except Exception as fallback_e:
+                    logger.error(f"Chaos-FILE: Failed to set up fallback folder {fallback_path}: {str(fallback_e)}")
+                    print(f"{Fore.RED}Chaos-FILE: Failed to create hidden folder: {str(e)}. Fallback failed: {str(fallback_e)}{Style.RESET_ALL}")
+                    sys.exit(1)
             time.sleep(1)
 
 HIDDEN_FOLDER = get_hidden_folder_path()
@@ -354,32 +369,64 @@ def save_license_key(license_key: str, issuance_date: str, hardware_id: str):
     max_attempts = 3
     for attempt in range(max_attempts):
         try:
+            hidden_folder = os.path.dirname(LICENSE_FILE_PATH)
+            os.makedirs(hidden_folder, exist_ok=True)
+            test_file = os.path.join(hidden_folder, "test_write")
+            with open(test_file, "w") as f:
+                f.write("test")
+            os.remove(test_file)
+            logger.info(f"Chaos-LIC: Verified folder is writable: {hidden_folder}")
             license_data = {
                 "license_key": license_key,
                 "issuance_date": issuance_date,
                 "hardware_id": hardware_id
             }
-            os.makedirs(os.path.dirname(LICENSE_FILE_PATH), exist_ok=True)
             with open(LICENSE_FILE_PATH, "w") as f:
-                json.dump(license_data, f)
-            logger.info(f"Chaos-LIC: License key saved to {LICENSE_FILE_PATH} (valid for {LICENSE_VALIDITY_DAYS} days, hardware_id: {hardware_id})")
-            return
+                json.dump(license_data, f, indent=2)
+            if os.path.exists(LICENSE_FILE_PATH):
+                with open(LICENSE_FILE_PATH, "r") as f:
+                    saved_data = json.load(f)
+                if saved_data == license_data:
+                    logger.info(f"Chaos-LIC: License key saved to {LICENSE_FILE_PATH} (valid for {LICENSE_VALIDITY_DAYS} days, hardware_id: {hardware_id})")
+                    print(f"{Fore.GREEN}Chaos-LIC: License key saved to {LICENSE_FILE_PATH}{Style.RESET_ALL}")
+                    return
+                else:
+                    logger.warning(f"Chaos-LIC: License file corrupted during write: {LICENSE_FILE_PATH}")
+            else:
+                logger.warning(f"Chaos-LIC: License file not created: {LICENSE_FILE_PATH}")
         except Exception as e:
-            logger.warning(f"Chaos-LIC: Attempt {attempt + 1}/{max_attempts} failed to save license key: {str(e)}")
+            logger.warning(f"Chaos-LIC: Attempt {attempt + 1}/{max_attempts} failed to save license key to {LICENSE_FILE_PATH}: {str(e)}")
             if attempt == max_attempts - 1:
-                logger.error(f"Chaos-LIC: Failed to save license key: {str(e)}")
-                print(f"{Fore.RED}Chaos-LIC: Failed to save license key: {str(e)}{Style.RESET_ALL}")
-                sys.exit(1)
+                fallback_path = os.path.join(os.path.expanduser("~"), HIDDEN_DIR_NAME, LICENSE_FILE)
+                try:
+                    os.makedirs(os.path.dirname(fallback_path), exist_ok=True)
+                    with open(fallback_path, "w") as f:
+                        json.dump(license_data, f, indent=2)
+                    if os.path.exists(fallback_path):
+                        logger.info(f"Chaos-LIC: License key saved to fallback {fallback_path}")
+                        print(f"{Fore.YELLOW}Chaos-LIC: License key saved to fallback {fallback_path}{Style.RESET_ALL}")
+                        global LICENSE_FILE_PATH
+                        LICENSE_FILE_PATH = fallback_path
+                        return
+                    else:
+                        logger.error(f"Chaos-LIC: Failed to save license key to fallback {fallback_path}")
+                except Exception as fallback_e:
+                    logger.error(f"Chaos-LIC: Failed to save license key: {str(e)}. Fallback failed: {str(fallback_e)}")
+                    print(f"{Fore.RED}Chaos-LIC: Failed to save license key: {str(e)}. Fallback failed: {str(fallback_e)}{Style.RESET_ALL}")
+                    sys.exit(1)
             time.sleep(1)
 
 def load_license_key() -> Optional[Dict[str, str]]:
     try:
         if os.path.exists(LICENSE_FILE_PATH):
             with open(LICENSE_FILE_PATH, "r") as f:
-                return json.load(f)
+                data = json.load(f)
+                logger.info(f"Chaos-LIC: Loaded license key from {LICENSE_FILE_PATH}")
+                return data
+        logger.info(f"Chaos-LIC: No license file found at {LICENSE_FILE_PATH}")
         return None
     except Exception as e:
-        logger.error(f"Chaos-LIC: Failed to load license key: {str(e)}")
+        logger.error(f"Chaos-LIC: Failed to load license key from {LICENSE_FILE_PATH}: {str(e)}")
         return None
 
 def create_blacklist_file(hardware_id: str, reason: str = "License expired"):
@@ -395,10 +442,9 @@ def create_blacklist_file(hardware_id: str, reason: str = "License expired"):
                     "reason": reason
                 }]
             }
-            ciphertext = encrypt_data(blacklist_data, key)
             os.makedirs(os.path.dirname(BLACKLIST_FILE_PATH), exist_ok=True)
             with open(BLACKLIST_FILE_PATH, "wb") as f:
-                f.write(ciphertext)
+                f.write(encrypt_data(blacklist_data, key))
             logger.info(f"Chaos-BLACKLIST: Created blacklist file with {hardware_id}: {reason}")
             return
         except Exception as e:
@@ -441,9 +487,10 @@ def check_blacklist(hardware_id: str) -> bool:
                 ciphertext = f.read()
             blacklist_data = decrypt_data(ciphertext, key)
             if hardware_id in blacklist_data.get("blacklisted_ids", []):
-                print(f"\n{Fore.RED}Chaos-LIC: PC blacklisted{Style.RESET_ALL}")
+                print(f"\n{Fore.RED}LICENSE HAS BEEN REVOKED OR INVALID KINDLY CONTACT TOOLS OWNER THANK U!!!{Style.RESET_ALL}")
                 logger.error("Chaos-LIC: PC blacklisted")
-                return True
+                time.sleep(5)  # Wait 5 seconds before exiting
+                sys.exit(1)
         return False
     except Exception as e:
         logger.error(f"Chaos-BLACKLIST: Failed to check blacklist: {str(e)}")
@@ -484,18 +531,21 @@ def validate_license() -> Tuple[bool, Optional[str], Optional[str], Optional[int
             create_blacklist_file(hardware_id)
             if os.path.exists(LICENSE_FILE_PATH):
                 os.remove(LICENSE_FILE_PATH)
-            print(f"\n{Fore.RED}Chaos-LIC: License expired on {expiration_date}{Style.RESET_ALL}")
+            print(f"\n{Fore.RED}LICENSE HAS BEEN REVOKED OR INVALID KINDLY CONTACT TOOLS OWNER THANK U!!!{Style.RESET_ALL}")
+            time.sleep(5)  # Wait 5 seconds before exiting
             return False, None, None, None
         if stored_key != expected_key:
             logger.error(f"Chaos-LIC: Invalid license key (expected: {expected_key[:10]}..., got: {stored_key[:10]}...)")
-            print(f"\n{Fore.RED}Chaos-LIC: Invalid license key{Style.RESET_ALL}")
+            print(f"\n{Fore.RED}LICENSE HAS BEEN REVOKED OR INVALID KINDLY CONTACT TOOLS OWNER THANK U!!!{Style.RESET_ALL}")
+            time.sleep(5)  # Wait 5 seconds before exiting
             return False, None, None, None
         logger.info(f"Chaos-LIC: License valid (expires {expiration_date})")
         print(f"\n{Fore.LIGHTBLUE_EX}License valid (expires {expiration_date}, {days_remaining} days remaining){Style.RESET_ALL}")
         return True, stored_key, expiration_date.strftime("%Y-%m-%d %H:%M:%S"), days_remaining
     except Exception as e:
         logger.error(f"Chaos-LIC: Invalid license format: {str(e)}")
-        print(f"\n{Fore.RED}Chaos-LIC: Invalid license format{Style.RESET_ALL}")
+        print(f"\n{Fore.RED}LICENSE HAS BEEN REVOKED OR INVALID KINDLY CONTACT TOOLS OWNER THANK U!!!{Style.RESET_ALL}")
+        time.sleep(5)  # Wait 5 seconds before exiting
         return False, None, None, None
 
 def revoke_license():
@@ -555,15 +605,15 @@ def display_instructions():
     print(f"\n{Fore.RED}{' ' * padding}{instructions}{Style.RESET_ALL}")
 
 def display_autograb_codes():
-    table_data = [
-        {"Autograb Code": f"{Fore.YELLOW}[{key}]{Style.RESET_ALL}"}
-        for key in AUTOGRAB_DATA.keys()
-    ]
-    table_data.extend([
-        {"Autograb Code": f"{Fore.YELLOW}[TIME]{Style.RESET_ALL}"},
-        {"Autograb Code": f"{Fore.YELLOW}[DATE]{Style.RESET_ALL}"},
-        {"Autograb Code": f"{Fore.YELLOW}[LINK]{Style.RESET_ALL}"}
-    ])
+    autograb_codes = list(AUTOGRAB_DATA.keys()) + ["TIME", "DATE", "LINK", "LINKS", "VICTIM NUM"]  # Added LINKS
+    table_data = []
+    for i in range(0, len(autograb_codes), 2):
+        code1 = autograb_codes[i]
+        code2 = autograb_codes[i + 1] if i + 1 < len(autograb_codes) else ""
+        table_data.append({
+            "Autograb Code 1": f"{Fore.YELLOW}[{code1}]{Style.RESET_ALL}" if code1 else "",
+            "Autograb Code 2": f"{Fore.YELLOW}[{code2}]{Style.RESET_ALL}" if code2 else ""
+        })
     header = f"Autograb Codes (SERPENT AI MODE):"
     terminal_width = shutil.get_terminal_size().columns
     print(f"\n{Fore.CYAN}{' ' * ((terminal_width - len(header)) // 2)}{header}{Style.RESET_ALL}")
@@ -595,6 +645,32 @@ def load_autograb_links() -> List[str]:
     except Exception as e:
         logger.error(f"Chaos-FILE: Failed to load links: {str(e)}")
         return []
+
+def load_links(links_file: str) -> List[str]:
+    try:
+        if not os.path.exists(links_file):
+            logger.error(f"Chaos-FILE: Links file not found: {links_file}")
+            print(f"{Fore.RED}Chaos-FILE: Links file not found: {links_file}{Style.RESET_ALL}")
+            sys.exit(1)
+        with open(links_file, "r", encoding="utf-8") as f:
+            links = [line.strip() for line in f if line.strip()]
+        if not links:
+            logger.error("Chaos-LINKS: No valid links in file")
+            print(f"{Fore.RED}Chaos-LINKS: No valid links in {links_file}{Style.RESET_ALL}")
+            sys.exit(1)
+        # Validate URLs
+        url_regex = r'^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/.*)?$'
+        valid_links = [link for link in links if re.match(url_regex, link)]
+        if not valid_links:
+            logger.error("Chaos-LINKS: No valid URLs in file")
+            print(f"{Fore.RED}Chaos-LINKS: No valid URLs in {links_file}{Style.RESET_ALL}")
+            sys.exit(1)
+        logger.info(f"Loaded {len(valid_links)} valid links from {links_file}")
+        return valid_links
+    except Exception as e:
+        logger.error(f"Chaos-LINKS: Failed to load links: {str(e)}")
+        print(f"{Fore.RED}Chaos-LINKS: Failed to load links: {str(e)}{Style.RESET_ALL}")
+        sys.exit(1)
 
 def analyze_spam_content(message: str) -> float:
     score = 0.0
@@ -798,11 +874,11 @@ def get_configs_mode1() -> tuple[List[Dict[str, str]], str, List[str], bool, Opt
 def get_configs_mode2() -> tuple[List[Dict[str, str]], str, List[str], bool, Optional[str], List[str], bool, Optional[str]]:
     if os.getenv("STARTUP_MODE") == "non_interactive":
         smtp_file = "smtp_configs.txt"
-        message = "Transaction at [BANK+NAME] for [AMOUNT]. Details: [LINK]"
+        message = "Transaction at [BANK+NAME] for [AMOUNT]. Details: [LINKS]"
         subjects = autograb_subjects()
         rotate_subjects = True
         selected_subject = None
-        links = ["https://example.com"]
+        links = load_links(LINKS_FILE)  # Load from links.txt
         rotate_links = False
         selected_link = links[0]
     else:
@@ -810,44 +886,42 @@ def get_configs_mode2() -> tuple[List[Dict[str, str]], str, List[str], bool, Opt
         while not smtp_file or not os.path.exists(smtp_file):
             print(f"SMTP file '{smtp_file}' does not exist.")
             smtp_file = input("SMTP Configuration File: ").strip()
-        print("\nAvailable autograb codes: [BANK], [AMOUNT], [CITY], [STORE], [TIME], [COMPANY], [DATE], [IP], [ZIP CODE], [LINK]")
-        print("Use + to join words (e.g., [BANK+NAME]), spaces as is, / or \\ as /")
-        print("Example: Transaction at [BANK+NAME] in [CITY] for [AMOUNT] on [DATE] at [TIME]. Details: [LINK]")
-        links = []
-        while not links:
-            link_input = input("Enter link(s) (comma-separated): ").strip()
-            links = [link.strip() for link in link_input.split(",") if link.strip()]
-            if not links:
-                print("At least one link is required.")
-                continue
-            rotate_links = False
-            selected_link = None
-            if len(links) > 1:
-                rotate = input("Rotate links? (y/n): ").strip().lower()
-                if rotate in ['y', 'yes']:
-                    rotate_links = True
-                    logger.info("Link rotation enabled")
-                else:
-                    select = input("Select one link? (y/n): ").strip().lower()
-                    if select in ['y', 'yes']:
-                        print("\nAvailable links:")
-                        for i, link in enumerate(links, 1):
-                            print(f"{i}. {link}")
-                        while True:
-                            choice = input("Enter link number: ").strip()
-                            if choice.isdigit() and 1 <= int(choice) <= len(links):
-                                selected_link = links[int(choice) - 1]
-                                logger.info(f"Selected link: {selected_link}")
-                                links = [selected_link]
-                                break
-                            print(f"Invalid choice. Enter 1-{len(links)}.")
-                    else:
-                        print("Enter a single link.")
-                        links = []
+        links_file = input("Links File (e.g., links.txt): ").strip() or LINKS_FILE
+        while not links_file or not os.path.exists(links_file):
+            print(f"Links file '{links_file}' does not exist.")
+            links_file = input("Links File (e.g., links.txt): ").strip() or LINKS_FILE
+        links = load_links(links_file)
+        rotate_links = False
+        selected_link = None
+        if len(links) > 1:
+            rotate = input("Rotate links? (y/n): ").strip().lower()
+            if rotate in ['y', 'yes']:
+                rotate_links = True
+                logger.info("Link rotation enabled")
             else:
-                selected_link = links[0]
-                logger.info(f"Using single link: {selected_link}")
+                select = input("Select one link? (y/n): ").strip().lower()
+                if select in ['y', 'yes']:
+                    print("\nAvailable links:")
+                    for i, link in enumerate(links, 1):
+                        print(f"{i}. {link}")
+                    while True:
+                        choice = input("Enter link number: ").strip()
+                        if choice.isdigit() and 1 <= int(choice) <= len(links):
+                            selected_link = links[int(choice) - 1]
+                            logger.info(f"Selected link: {selected_link}")
+                            links = [selected_link]
+                            break
+                        print(f"Invalid choice. Enter 1-{len(links)}.")
+                else:
+                    print("Enter a single links file.")
+                    sys.exit(1)
+        else:
+            selected_link = links[0]
+            logger.info(f"Using single link: {selected_link}")
         save_autograb_links(links)
+        print("\nAvailable autograb codes: [BANK], [AMOUNT], [CITY], [STORE], [COMPANY], [IP], [ZIP CODE], [TIME], [DATE], [LINK], [LINKS], [VICTIM NUM]")
+        print("Use + to join words (e.g., [BANK+NAME]), spaces as is, / or \\ as /")
+        print("Example: Transaction at [BANK+NAME] in [CITY] for [AMOUNT] on [DATE] at [TIME]. Details: [LINKS]")
         message = ""
         while not message:
             message = input("Enter message (max 160 chars after replacements): ").strip()
@@ -933,19 +1007,24 @@ def configure_smtp_and_messages(
             logger.info(f"Using message: {selected_message[:CONTENT_SNIPPET_LENGTH]}...")
     return selected_smtp, rotate_smtp, selected_message, rotate_messages, subjects, rotate_subjects, selected_subject
 
-def process_autograb_codes(message: str, link: Optional[str] = None) -> str:
+def process_autograb_codes(message: str, link: Optional[str] = None, links: Optional[List[str]] = None, recipient_email: Optional[str] = None) -> str:
     autograb_iterators = {key: cycle(values) for key, values in AUTOGRAB_DATA.items()}
+    links_iterator = cycle(links) if links else None
     def replace_code(match):
         code = match.group(1)
         code = code.replace('/', '/').replace('\\', '/')
         if code == "TIME":
-            tz = random.choice(USA_TIMEZONES)
-            usa_time = datetime.now(pytz.timezone(tz)).strftime("%I:%M %p")
-            return usa_time
+            return datetime.now(pytz.UTC).strftime("%I:%M:%S %p")  # Current GMT time
         elif code == "DATE":
             return datetime.now(pytz.timezone("US/Eastern")).strftime("%m/%d/%Y")
         elif code == "LINK":
             return link if link else ""
+        elif code == "LINKS":
+            return next(links_iterator) if links_iterator else ""
+        elif code == "VICTIM NUM":
+            if recipient_email:
+                return f"+{recipient_email.split('@')[0]}"
+            return ""
         elif '+' in code:
             base_code = code.split('+')[0]
             if base_code in AUTOGRAB_DATA:
@@ -967,9 +1046,10 @@ def send_sms(
     subject: str,
     chaos_id: str,
     link: Optional[str] = None,
+    links: Optional[List[str]] = None,
     max_retries: int = MAX_RETRIES
 ) -> tuple[bool, str, str, str, float]:
-    message = process_autograb_codes(message, link)
+    message = process_autograb_codes(message, link, links, recipient_email)
     if len(message) > 160:
         message = message[:157] + "..."
     score = analyze_spam_content(message)
@@ -1055,7 +1135,7 @@ def worker(
                 subject = get_subject(subjects, rotate_subjects, selected_subject)
                 link = next(link_iterator) if link_iterator else selected_link
                 success, timestamp, content_snippet, formatted_subject, spam_score = send_sms(
-                    smtp, sender_name, smtp_config["sender_email"], recipient_email, message, subject, chaos_id, link
+                    smtp, sender_name, smtp_config["sender_email"], recipient_email, message, subject, chaos_id, link, links
                 )
                 status = f"{Fore.GREEN}Sent{Style.RESET_ALL}" if success else f"{Fore.RED}Failed{Style.RESET_ALL}"
                 content_display = f"Subject: {Fore.YELLOW}{formatted_subject}{Style.RESET_ALL} Message: {content_snippet}"
@@ -1090,7 +1170,7 @@ def send_bulk_sms(
         messages = load_messages(message_file)
     elif mode == "mode2":
         messages = messages or []
-    spam_results = check_spam_content([process_autograb_codes(msg, links[0] if links else None) for msg in messages])
+    spam_results = check_spam_content([process_autograb_codes(msg, links[0] if links else None, links) for msg in messages])
     high_spam_messages = [res for res in spam_results if res["score"] >= SPAM_THRESHOLD_LOW]
     if high_spam_messages and os.getenv("STARTUP_MODE") != "non_interactive":
         print(f"\n{Fore.RED}WARNING: Potential spam in {len(high_spam_messages)} messages{Style.RESET_ALL}")
@@ -1157,8 +1237,8 @@ def select_mode() -> str:
         logger.info("Selected SERPENT AI MODE (non-interactive)")
         return "mode2"
     print(f"\n{Fore.CYAN}Select Operation Mode:{Style.RESET_ALL}")
-    print("1. MODERN SENDER MODE Load messages from file, prompt subjects")
-    print("2. SERPENT AI MODE (AUTOGRAB MODE 4 SERPENT AI)")
+    print("1. MODERN SENDER MODE")
+    print("2. SERPENT AI MODE")
     while True:
         choice = input("Enter mode (1 or 2): ").strip()
         if choice in ["1", "2"]:
@@ -1185,39 +1265,35 @@ def main():
         if args.non_interactive:
             os.environ["STARTUP_MODE"] = "non_interactive"
         chaos_id = chaos_string(5)
-        # Format date and time in US Eastern Time for logging
         current_time = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d %I:%M %p")
-        # Validate license
         is_valid, license_key, expiration_date, days_remaining = validate_license()
         if not is_valid:
             sys.exit(1)
-        # Display "SMS SERPENT RUNNING" in a box, bold yellow, centered
         startup_message = "SMS SERPENT RUNNING"
         terminal_width = shutil.get_terminal_size().columns
         message_length = len(startup_message)
-        box_width = message_length + 4  # 2 spaces padding on each side
+        box_width = message_length + 4
         padding = (terminal_width - box_width) // 2 if terminal_width > box_width else 0
         horizontal_border = "+" + "-" * (box_width - 2) + "+"
         print(f"\n{' ' * padding}{Fore.YELLOW}{Style.BRIGHT}{horizontal_border}{Style.RESET_ALL}")
         print(f"{' ' * padding}{Fore.YELLOW}{Style.BRIGHT}| {' ' * (box_width - message_length - 4)}{startup_message}{' ' * (box_width - message_length - 4)} |{Style.RESET_ALL}")
         print(f"{' ' * padding}{Fore.YELLOW}{Style.BRIGHT}{horizontal_border}{Style.RESET_ALL}")
-        # Log full message to serpent.log
         logger.info(f"~~~~~~\nStarting SMS SERPENT\n{current_time}\n~~~~~~")
         if args.revoke_license:
             revoke_license()
             return
         if os.getenv("STARTUP_MODE") != "non_interactive":
-            # Display license information without box or underline
             print(f"\n{Fore.LIGHTBLUE_EX}License Information:{Style.RESET_ALL}")
             print(f"{Fore.LIGHTBLUE_EX}License Key: {license_key}{Style.RESET_ALL}")
             print(f"{Fore.LIGHTBLUE_EX}Expiration Date: {expiration_date}{Style.RESET_ALL}")
             print(f"{Fore.LIGHTBLUE_EX}Days Remaining: {days_remaining}{Style.RESET_ALL}")
+            print(f"{Fore.LIGHTBLUE_EX}License File Location: {LICENSE_FILE_PATH}{Style.RESET_ALL}")
+
         if not os.path.exists(CSV_FILE):
             logger.error(f"Chaos-FILE: Numbers file not found: {CSV_FILE}")
             print(f"{Fore.RED}Chaos-FILE: Numbers file not found: {CSV_FILE}{Style.RESET_ALL}")
             sys.exit(1)
         mode = select_mode()
-        # Display autograb codes for SERPENT AI MODE in interactive mode
         if mode == "mode2" and os.getenv("STARTUP_MODE") != "non_interactive":
             display_autograb_codes()
         if mode == "mode1":
