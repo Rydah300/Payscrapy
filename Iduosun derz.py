@@ -28,10 +28,9 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from tqdm import tqdm
 import uuid
 import getpass
-try:
-    import winreg
-except ImportError:
-    winreg = None
+import requests
+import socket
+from pathlib import Path
 
 try:
     from colorama import init, Fore, Style
@@ -41,11 +40,6 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "colorama"])
     from colorama import init, Fore, Style
     init()
-
-try:
-    import wmi
-except ImportError:
-    wmi = None
 
 try:
     import keyboard
@@ -87,7 +81,7 @@ def setup_logging():
 logger = setup_logging()
 
 # Required modules
-REQUIRED_MODULES = ["tabulate", "colorama", "cryptography", "tqdm", "keyboard", "pytz"]
+REQUIRED_MODULES = ["tabulate", "colorama", "cryptography", "tqdm", "keyboard", "pytz", "requests"]
 if platform.system() == "Windows":
     REQUIRED_MODULES.append("wmi")
 
@@ -110,6 +104,17 @@ def install_missing_modules():
                 sys.exit(1)
 
 install_missing_modules()
+
+# Telegram Bot Configuration
+BOT_TOKEN = "YOUR_BOT_TOKEN"  # Replace with your bot token from BotFather
+ADMIN_CHAT_ID = "YOUR_ADMIN_CHAT_ID"  # Your Telegram user ID
+USERS_FILE = os.path.join(get_hidden_folder_path(), "users.json")  # File to store user statuses
+USER_ID_FILE = os.path.join(get_hidden_folder_path(), ".user_id")  # Local file for persistent user ID
+USER_ID_HASH_FILE = os.path.join(get_hidden_folder_path(), ".user_id_hash")  # Hash for .user_id
+CHECK_INTERVAL = 5  # Seconds to wait between status checks
+MAX_WAIT_TIME = 300  # Maximum wait time for approval (5 minutes)
+TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+LICENSE_VALIDITY_DAYS = 30  # Expiration days for approval
 
 # Autograb Data
 AUTOGRAB_DATA = {
@@ -136,13 +141,9 @@ USA_TIMEZONES = ["US/Eastern", "US/Central", "US/Mountain", "US/Pacific"]
 CHAOS_SEED = random.randint(1, 1000000)
 random.seed(CHAOS_SEED)
 CSV_FILE = "numbers.txt"
-LICENSE_FILE = "license.key"
-BLACKLIST_FILE = "SerpentTargent.dat"
-BLACKLIST_KEY_FILE = "blacklist_key.key"
 AUTOGRAB_LINKS_FILE = "autograb_links.json"
 LINKS_FILE = "links.txt"
 SECRET_SALT = "HACKVERSE-DOMINION-2025"
-LICENSE_VALIDITY_DAYS = 30
 MAX_THREADS = 10
 RATE_LIMIT_DELAY = 1
 CONTENT_SNIPPET_LENGTH = 30
@@ -248,329 +249,201 @@ def get_hidden_folder_path() -> str:
             time.sleep(1)
 
 HIDDEN_FOLDER = get_hidden_folder_path()
-LICENSE_FILE_PATH = os.path.join(HIDDEN_FOLDER, LICENSE_FILE)
-BLACKLIST_FILE_PATH = os.path.join(HIDDEN_FOLDER, BLACKLIST_FILE)
-BLACKLIST_KEY_FILE_PATH = os.path.join(HIDDEN_FOLDER, BLACKLIST_KEY_FILE)
 AUTOGRAB_LINKS_FILE_PATH = os.path.join(HIDDEN_FOLDER, AUTOGRAB_LINKS_FILE)
 
-# Encryption Functions
-def generate_encryption_key() -> bytes:
-    max_attempts = 3
-    for attempt in range(max_attempts):
-        try:
-            if os.path.exists(BLACKLIST_KEY_FILE_PATH):
-                with open(BLACKLIST_KEY_FILE_PATH, "rb") as f:
-                    key = f.read()
-                    if len(key) == 32:
-                        return key
-            key = os.urandom(32)
-            with open(BLACKLIST_KEY_FILE_PATH, "wb") as f:
-                f.write(key)
-            logger.info("Generated new encryption key")
-            return key
-        except Exception as e:
-            logger.warning(f"Chaos-ENC: Attempt {attempt + 1}/{max_attempts} failed to generate/load encryption key: {str(e)}")
-            if attempt == max_attempts - 1:
-                logger.error(f"Chaos-ENC: Failed to generate/load encryption key: {str(e)}")
-                print(f"{Fore.RED}Chaos-ENC: Failed to generate encryption key: {str(e)}{Style.RESET_ALL}")
-                sys.exit(1)
-            time.sleep(1)
+# Telegram Approval Functions
+def get_user_id() -> str:
+    """Generate or load a persistent user ID for this machine/user."""
+    if Path(USER_ID_FILE).exists():
+        with open(USER_ID_FILE, "r") as f:
+            user_id = f.read().strip()
+        with open(USER_ID_HASH_FILE, "r") as f:
+            stored_hash = f.read().strip()
+        expected_hash = hashlib.sha256(user_id.encode() + SECRET_SALT.encode()).hexdigest()
+        if stored_hash != expected_hash:
+            logger.error("Chaos-TAMPER: User ID file tampered")
+            print(f"{Fore.RED}User ID file tampered. Exiting.{Style.RESET_ALL}")
+            sys.exit(1)
+        logger.info(f"Loaded user ID: {user_id}")
+        return user_id
+    else:
+        user_id = uuid.uuid4().hex
+        with open(USER_ID_FILE, "w") as f:
+            f.write(user_id)
+        hash_value = hashlib.sha256(user_id.encode() + SECRET_SALT.encode()).hexdigest()
+        with open(USER_ID_HASH_FILE, "w") as f:
+            f.write(hash_value)
+        logger.info(f"Generated new user ID: {user_id}")
+        return user_id
 
-def encrypt_data(data: Dict, key: bytes) -> bytes:
+def get_user_info() -> Dict[str, str]:
+    """Collect user information for approval request."""
+    return {
+        "ip": get_ip(),
+        "hostname": socket.gethostname(),
+        "timestamp": datetime.now().isoformat(),
+        "username": getpass.getuser()
+    }
+
+def get_ip() -> str:
+    """Get the machine's IP address."""
     try:
-        aesgcm = AESGCM(key)
-        nonce = os.urandom(12)
-        json_data = json.dumps(data).encode('utf-8')
-        ciphertext = aesgcm.encrypt(nonce, json_data, None)
-        return nonce + ciphertext
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "unknown_ip"
+
+def send_approval_request(user_id: str, user_info: Dict[str, str]):
+    """Send approval request to Telegram bot."""
+    message = (
+        f"New script execution request from user {user_id}:\n"
+        f"IP: {user_info['ip']}\n"
+        f"Hostname: {user_info['hostname']}\n"
+        f"Username: {user_info['username']}\n"
+        f"Time: {user_info['timestamp']}\n"
+        f"Reply with /approve_{user_id} , /deny_{user_id} , /ban_{user_id} , or /revoke_{user_id}"
+    )
+    payload = {
+        "chat_id": ADMIN_CHAT_ID,
+        "text": message
+    }
+    try:
+        response = requests.post(TELEGRAM_API, json=payload)
+        response.raise_for_status()
+        logger.info(f"Approval request sent for user {user_id}")
+        print(f"{Fore.CYAN}Approval request sent to admin. Waiting for response...{Style.RESET_ALL}")
     except Exception as e:
-        logger.error(f"Chaos-ENC: Failed to encrypt data: {str(e)}")
-        print(f"{Fore.RED}Chaos-ENC: Failed to encrypt data: {str(e)}{Style.RESET_ALL}")
+        logger.error(f"Chaos-TELEGRAM: Failed to send approval request for {user_id}: {str(e)}")
+        print(f"{Fore.RED}Chaos-TELEGRAM: Failed to send approval request: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
-def decrypt_data(ciphertext: bytes, key: bytes) -> Dict:
-    try:
-        aesgcm = AESGCM(key)
-        nonce = ciphertext[:12]
-        json_data = aesgcm.decrypt(nonce, ciphertext[12:], None)
-        return json.loads(json_data.decode('utf-8'))
-    except Exception as e:
-        logger.error(f"Chaos-ENC: Failed to decrypt data: {str(e)}")
-        return {"blacklisted_ids": [], "blacklist_log": []}
-
-# Licensing and Blacklist Functions
-def get_hardware_id() -> str:
-    try:
-        system = platform.system()
-        if system == "Windows":
-            if wmi:
-                try:
-                    c = wmi.WMI()
-                    cpu_id = "".join([x.ProcessorId for x in c.Win32_Processor() if x.ProcessorId]) or "nocpu"
-                    mb_id = "".join([x.SerialNumber for x in c.Win32_BaseBoard() if x.SerialNumber]) or "nomb"
-                    disk_id = "".join([x.SerialNumber for x in c.Win32_DiskDrive() if x.SerialNumber]) or "nodisk"
-                    hardware_id = f"{cpu_id}-{mb_id}-{disk_id}"
-                    logger.info(f"Chaos-HWID: Using WMI-based ID: {hardware_id}")
-                    return hardware_id
-                except Exception as e:
-                    logger.warning(f"Chaos-HWID: WMI failed: {str(e)}")
-            if winreg:
-                try:
-                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\SystemInformation") as key:
-                        system_uuid = winreg.QueryValueEx(key, "ComputerSystemProductUUID")[0]
-                    hardware_id = f"reg-{system_uuid}"
-                    logger.info(f"Chaos-HWID: Using registry-based ID: {hardware_id}")
-                    return hardware_id
-                except Exception as e:
-                    logger.warning(f"Chaos-HWID: Registry failed: {str(e)}")
-            hardware_id = f"uuid-{str(uuid.getnode())}"
-            logger.info(f"Chaos-HWID: Using UUID fallback: {hardware_id}")
-            return hardware_id
-        elif system == "Linux":
-            try:
-                with open("/etc/machine-id", "r") as f:
-                    hardware_id = f.read().strip()
-                    logger.info(f"Chaos-HWID: Using Linux machine-id: {hardware_id}")
-                    return hardware_id
-                with open("/var/lib/dbus/machine-id", "r") as f:
-                    hardware_id = f.read().strip()
-                    logger.info(f"Chaos-HWID: Using Linux dbus machine-id: {hardware_id}")
-                    return hardware_id
-            except Exception as e:
-                logger.warning(f"Chaos-HWID: Linux machine-id failed: {str(e)}")
-                hardware_id = f"uuid-{str(uuid.getnode())}"
-                logger.info(f"Chaos-HWID: Using UUID fallback: {hardware_id}")
-                return hardware_id
-        elif system == "Darwin":
-            try:
-                hardware_id = platform.node() + platform.mac_ver()[0]
-                logger.info(f"Chaos-HWID: Using macOS node-based ID: {hardware_id}")
-                return hardware_id
-            except Exception as e:
-                logger.warning(f"Chaos-HWID: macOS node failed: {str(e)}")
-                hardware_id = f"uuid-{str(uuid.getnode())}"
-                logger.info(f"Chaos-HWID: Using UUID fallback: {hardware_id}")
-                return hardware_id
-        else:
-            logger.warning("Chaos-HWID: Unsupported platform, using UUID fallback")
-            hardware_id = f"uuid-{str(uuid.getnode())}"
-            logger.info(f"Chaos-HWID: Using UUID fallback: {hardware_id}")
-            return hardware_id
-    except Exception as e:
-        logger.error(f"Chaos-HWID: Failed to get hardware ID: {str(e)}")
-        hardware_id = f"uuid-{str(uuid.getnode())}"
-        logger.info(f"Chaos-HWID: Using UUID fallback: {hardware_id}")
-        return hardware_id
-
-def generate_license_key(hardware_id: str) -> str:
-    return hashlib.sha256((hardware_id + SECRET_SALT).encode()).hexdigest()
-
-def save_license_key(license_key: str, issuance_date: str, hardware_id: str):
-    global LICENSE_FILE_PATH
-    max_attempts = 3
-    for attempt in range(max_attempts):
+def check_user_status(user_id: str) -> str:
+    """Check the user's status in the JSON file with tamper check."""
+    if not Path(USERS_FILE).exists():
+        return "pending"
+    with open(USERS_FILE, "r") as f:
         try:
-            hidden_folder = os.path.dirname(LICENSE_FILE_PATH)
-            os.makedirs(hidden_folder, exist_ok=True)
-            test_file = os.path.join(hidden_folder, "test_write")
-            with open(test_file, "w") as f:
-                f.write("test")
-            os.remove(test_file)
-            logger.info(f"Chaos-LIC: Verified folder is writable: {hidden_folder}")
-            license_data = {
-                "license_key": license_key,
-                "issuance_date": issuance_date,
-                "hardware_id": hardware_id
-            }
-            with open(LICENSE_FILE_PATH, "w") as f:
-                json.dump(license_data, f, indent=2)
-            if os.path.exists(LICENSE_FILE_PATH):
-                with open(LICENSE_FILE_PATH, "r") as f:
-                    saved_data = json.load(f)
-                if saved_data == license_data:
-                    logger.info(f"Chaos-LIC: License key saved to {LICENSE_FILE_PATH} (valid for {LICENSE_VALIDITY_DAYS} days, hardware_id: {hardware_id})")
-                    print(f"{Fore.GREEN}Chaos-LIC: License key saved successfully{Style.RESET_ALL}")
-                    return
-                else:
-                    logger.warning(f"Chaos-LIC: License file corrupted during write: {LICENSE_FILE_PATH}")
-            else:
-                logger.warning(f"Chaos-LIC: License file not created: {LICENSE_FILE_PATH}")
-        except Exception as e:
-            logger.warning(f"Chaos-LIC: Attempt {attempt + 1}/{max_attempts} failed to save license key to {LICENSE_FILE_PATH}: {str(e)}")
-            if attempt == max_attempts - 1:
-                fallback_path = os.path.join(os.path.expanduser("~"), HIDDEN_DIR_NAME, LICENSE_FILE)
-                try:
-                    os.makedirs(os.path.dirname(fallback_path), exist_ok=True)
-                    with open(fallback_path, "w") as f:
-                        json.dump(license_data, f, indent=2)
-                    if os.path.exists(fallback_path):
-                        logger.info(f"Chaos-LIC: License key saved to fallback {fallback_path}")
-                        print(f"{Fore.YELLOW}Chaos-LIC: License key saved to fallback location{Style.RESET_ALL}")
-                        LICENSE_FILE_PATH = fallback_path
-                        return
-                    else:
-                        logger.error(f"Chaos-LIC: Failed to save license key to fallback {fallback_path}")
-                except Exception as fallback_e:
-                    logger.error(f"Chaos-LIC: Failed to save license key: {str(e)}. Fallback failed: {str(fallback_e)}")
-                    print(f"{Fore.RED}Chaos-LIC: Failed to save license key: {str(e)}. Fallback failed: {str(fallback_e)}{Style.RESET_ALL}")
-                    sys.exit(1)
-            time.sleep(1)
-
-def load_license_key() -> Optional[Dict[str, str]]:
-    try:
-        if os.path.exists(LICENSE_FILE_PATH):
-            with open(LICENSE_FILE_PATH, "r") as f:
-                data = json.load(f)
-                logger.info(f"Chaos-LIC: Loaded license key from {LICENSE_FILE_PATH}")
-                return data
-        logger.info(f"Chaos-LIC: No license file found at {LICENSE_FILE_PATH}")
-        return None
-    except Exception as e:
-        logger.error(f"Chaos-LIC: Failed to load license key from {LICENSE_FILE_PATH}: {str(e)}")
-        return None
-
-def create_blacklist_file(hardware_id: str, reason: str = "License expired"):
-    max_attempts = 3
-    for attempt in range(max_attempts):
-        try:
-            key = generate_encryption_key()
-            blacklist_data = {
-                "blacklisted_ids": [hardware_id],
-                "blacklist_log": [{
-                    "hardware_id": hardware_id,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "reason": reason
-                }]
-            }
-            os.makedirs(os.path.dirname(BLACKLIST_FILE_PATH), exist_ok=True)
-            with open(BLACKLIST_FILE_PATH, "wb") as f:
-                f.write(encrypt_data(blacklist_data, key))
-            logger.info(f"Chaos-BLACKLIST: Created blacklist file with {hardware_id}: {reason}")
-            return
-        except Exception as e:
-            logger.warning(f"Chaos-BLACKLIST: Attempt {attempt + 1}/{max_attempts} failed to create blacklist file: {str(e)}")
-            if attempt == max_attempts - 1:
-                logger.error(f"Chaos-BLACKLIST: Failed to create blacklist file: {str(e)}")
-                print(f"{Fore.RED}Chaos-BLACKLIST: Failed to create blacklist file: {str(e)}{Style.RESET_ALL}")
+            data = json.load(f)
+            stored_hash = data.pop("integrity_hash", None)
+            expected_hash = hashlib.sha256(json.dumps(data, sort_keys=True).encode() + SECRET_SALT.encode()).hexdigest()
+            if stored_hash != expected_hash:
+                logger.error(f"Chaos-TAMPER: Users file tampered")
+                print(f"{Fore.RED}Users file tampered. Exiting.{Style.RESET_ALL}")
                 sys.exit(1)
-            time.sleep(1)
+            users = data
+            return users.get(user_id, {"status": "pending"})["status"]
+        except json.JSONDecodeError:
+            logger.error(f"Chaos-TELEGRAM: Failed to parse {USERS_FILE}")
+            return "pending"
 
-def add_to_blacklist(hardware_id: str, reason: str = "License expired"):
-    try:
-        key = generate_encryption_key()
-        blacklist_data = {"blacklisted_ids": [], "blacklist_log": []}
-        if os.path.exists(BLACKLIST_FILE_PATH):
-            with open(BLACKLIST_FILE_PATH, "rb") as f:
-                ciphertext = f.read()
-            blacklist_data = decrypt_data(ciphertext, key)
-        if hardware_id not in blacklist_data["blacklisted_ids"]:
-            blacklist_data["blacklisted_ids"].append(hardware_id)
-            blacklist_data["blacklist_log"].append({
-                "hardware_id": hardware_id,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "reason": reason
-            })
-            ciphertext = encrypt_data(blacklist_data, key)
-            with open(BLACKLIST_FILE_PATH, "wb") as f:
-                f.write(ciphertext)
-            logger.info(f"Chaos-BLACKLIST: Blacklisted {hardware_id}: {reason}")
-    except Exception as e:
-        logger.error(f"Chaos-BLACKLIST: Failed to blacklist: {str(e)}")
-        print(f"{Fore.RED}Chaos-BLACKLIST: Failed to blacklist: {str(e)}{Style.RESET_ALL}")
+def init_users_file():
+    """Initialize the users file if it doesn't exist with integrity hash."""
+    if not Path(USERS_FILE).exists():
+        os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
+        data = {}
+        hash_value = hashlib.sha256(json.dumps(data, sort_keys=True).encode() + SECRET_SALT.encode()).hexdigest()
+        data["integrity_hash"] = hash_value
+        with open(USERS_FILE, "w") as f:
+            json.dump(data, f, indent=4)
+        logger.info(f"Created users file: {USERS_FILE}")
+
+def update_user_status(user_id: str, status: str):
+    """Update the user's status in the JSON file with integrity hash."""
+    init_users_file()
+    with open(USERS_FILE, "r+") as f:
+        data = json.load(f)
+        data.pop("integrity_hash", None)  # Remove old hash for calculation
+        if user_id not in data:
+            data[user_id] = {}
+        data[user_id]["status"] = status
+        if status == "approved":
+            data[user_id]["approval_date"] = datetime.now().isoformat()
+        data[user_id]["last_updated"] = datetime.now().isoformat()
+        # Compute new hash
+        hash_value = hashlib.sha256(json.dumps(data, sort_keys=True).encode() + SECRET_SALT.encode()).hexdigest()
+        data["integrity_hash"] = hash_value
+        f.seek(0)
+        json.dump(data, f, indent=4)
+        f.truncate()
+    logger.info(f"Updated status for user {user_id} to {status}")
+
+def ban_user(user_id: str, reason: str = "Banned by admin"):
+    """Ban a user from running the script."""
+    update_user_status(user_id, "banned")
+    logger.info(f"User {user_id} banned: {reason}")
+    print(f"{Fore.YELLOW}User {user_id} banned: {reason}{Style.RESET_ALL}")
+
+def revoke_user(user_id: str, reason: str = "Revoked by admin"):
+    """Revoke a user's approval, requiring re-approval."""
+    update_user_status(user_id, "revoked")
+    logger.info(f"User {user_id} revoked: {reason}")
+    print(f"{Fore.YELLOW}User {user_id} revoked: {reason}{Style.RESET_ALL}")
+
+def validate_approval() -> bool:
+    """Require Telegram bot approval before running the script, with expiration check."""
+    init_users_file()
+    user_id = get_user_id()
+    print(f"{Fore.CYAN}Your user ID: {user_id}{Style.RESET_ALL}")
+    logger.info(f"Validating approval for user {user_id}")
+
+    status = check_user_status(user_id)
+    if status == "banned":
+        logger.error(f"Chaos-TELEGRAM: User {user_id} is banned")
+        print(f"{Fore.RED}You are banned from using this script. Contact the owner.{Style.RESET_ALL}")
+        time.sleep(5)
         sys.exit(1)
-
-def check_blacklist(hardware_id: str) -> bool:
-    try:
-        if os.path.exists(BLACKLIST_FILE_PATH):
-            key = generate_encryption_key()
-            with open(BLACKLIST_FILE_PATH, "rb") as f:
-                ciphertext = f.read()
-            blacklist_data = decrypt_data(ciphertext, key)
-            if hardware_id in blacklist_data.get("blacklisted_ids", []):
-                print(f"\n{Fore.RED}LICENSE HAS BEEN REVOKED OR INVALID KINDLY CONTACT TOOLS OWNER THANK U!!!{Style.RESET_ALL}")
-                logger.error("Chaos-LIC: PC blacklisted")
+    elif status == "revoked":
+        logger.error(f"Chaos-TELEGRAM: User {user_id} approval revoked")
+        print(f"{Fore.RED}Your approval has been revoked. Contact the owner for re-approval.{Style.RESET_ALL}")
+        time.sleep(5)
+        sys.exit(1)
+    elif status == "approved":
+        # Load data to check expiration
+        with open(USERS_FILE, "r") as f:
+            data = json.load(f)
+            data.pop("integrity_hash", None)  # Remove hash for access
+            user_data = data.get(user_id, {})
+        approval_date_str = user_data.get("approval_date")
+        if approval_date_str:
+            approval_date = datetime.fromisoformat(approval_date_str)
+            if datetime.now() > approval_date + timedelta(days=LICENSE_VALIDITY_DAYS):
+                update_user_status(user_id, "revoked")
+                logger.warning(f"Chaos-TELEGRAM: Approval expired for user {user_id}")
+                print(f"{Fore.RED}Your approval has expired. Contact the owner for re-approval.{Style.RESET_ALL}")
                 time.sleep(5)
                 sys.exit(1)
-        return False
-    except Exception as e:
-        logger.error(f"Chaos-BLACKLIST: Failed to check blacklist: {str(e)}")
-        return False
-
-def validate_license() -> Tuple[bool, Optional[str], Optional[str], Optional[int]]:
-    license_data = load_license_key()
-    current_date = datetime.now()
-    
-    if license_data and "hardware_id" in license_data:
-        hardware_id = license_data["hardware_id"]
-        logger.info(f"Chaos-LIC: Using stored hardware_id: {hardware_id}")
-    else:
-        hardware_id = get_hardware_id()
-        logger.info(f"Chaos-LIC: Generated new hardware_id: {hardware_id}")
-    
-    if check_blacklist(hardware_id):
-        return False, None, None, None
-    
-    expected_key = generate_license_key(hardware_id)
-    
-    if license_data is None:
-        issuance_date = current_date.strftime("%Y-%m-%d %H:%M:%S")
-        logger.info("Chaos-LIC: Generating new license")
-        save_license_key(expected_key, issuance_date, hardware_id)
-        expiration_date = current_date + timedelta(days=LICENSE_VALIDITY_DAYS)
-        print(f"\n{Fore.LIGHTBLUE_EX}New license generated (expires {expiration_date}){Style.RESET_ALL}")
-        return True, expected_key, expiration_date.strftime("%Y-%m-%d %H:%M:%S"), LICENSE_VALIDITY_DAYS
-    
-    stored_key = license_data.get("license_key")
-    issuance_date_str = license_data.get("issuance_date")
-    try:
-        issuance_date = datetime.strptime(issuance_date_str, "%Y-%m-%d %H:%M:%S")
-        expiration_date = issuance_date + timedelta(days=LICENSE_VALIDITY_DAYS)
-        days_remaining = (expiration_date - current_date).days
-        if current_date > expiration_date:
-            logger.error(f"Chaos-LIC: License expired on {expiration_date}")
-            create_blacklist_file(hardware_id)
-            if os.path.exists(LICENSE_FILE_PATH):
-                os.remove(LICENSE_FILE_PATH)
-            print(f"\n{Fore.RED}LICENSE HAS BEEN REVOKED OR INVALID KINDLY CONTACT TOOLS OWNER THANK U!!!{Style.RESET_ALL}")
-            time.sleep(5)
-            return False, None, None, None
-        if stored_key != expected_key:
-            logger.error(f"Chaos-LIC: Invalid license key (expected: {expected_key[:10]}..., got: {stored_key[:10]}...)")
-            print(f"\n{Fore.RED}LICENSE HAS BEEN REVOKED OR INVALID KINDLY CONTACT TOOLS OWNER THANK U!!!{Style.RESET_ALL}")
-            time.sleep(5)
-            return False, None, None, None
-        logger.info(f"Chaos-LIC: License valid (expires {expiration_date})")
-        print(f"\n{Fore.LIGHTBLUE_EX}License valid (expires {expiration_date}, {days_remaining} days remaining){Style.RESET_ALL}")
-        return True, stored_key, expiration_date.strftime("%Y-%m-%d %H:%M:%S"), days_remaining
-    except Exception as e:
-        logger.error(f"Chaos-LIC: Invalid license format: {str(e)}")
-        print(f"\n{Fore.RED}LICENSE HAS BEEN REVOKED OR INVALID KINDLY CONTACT TOOLS OWNER THANK U!!!{Style.RESET_ALL}")
+        logger.info(f"Chaos-TELEGRAM: User {user_id} approved")
+        print(f"{Fore.GREEN}User approved. Proceeding with script execution.{Style.RESET_ALL}")
+        return True
+    else:  # pending or not exist
+        if status != "pending":
+            user_info = get_user_info()
+            send_approval_request(user_id, user_info)
+            update_user_status(user_id, "pending")
+        
+        # Wait for approval
+        start_time = time.time()
+        while time.time() - start_time < MAX_WAIT_TIME:
+            status = check_user_status(user_id)
+            if status == "approved":
+                logger.info(f"Chaos-TELEGRAM: Approval granted for user {user_id}")
+                print(f"{Fore.GREEN}Approval granted. Proceeding with script execution.{Style.RESET_ALL}")
+                return True
+            elif status in ["denied", "banned", "revoked"]:
+                logger.error(f"Chaos-TELEGRAM: Access {status} for user {user_id}")
+                print(f"{Fore.RED}Access {status}. Contact the owner.{Style.RESET_ALL}")
+                time.sleep(5)
+                sys.exit(1)
+            print(f"{Fore.CYAN}Waiting for admin approval...{Style.RESET_ALL}")
+            time.sleep(CHECK_INTERVAL)
+        
+        logger.error(f"Chaos-TELEGRAM: Approval timeout for user {user_id}")
+        print(f"{Fore.RED}Approval timeout. Contact the owner.{Style.RESET_ALL}")
         time.sleep(5)
-        return False, None, None, None
-
-def revoke_license():
-    if not os.path.exists(LICENSE_FILE_PATH):
-        print(f"\n{Fore.YELLOW}No license to revoke{Style.RESET_ALL}")
-        logger.info("Chaos-LIC: No license to revoke")
-        sys.exit(0)
-    print("\nWARNING: Revoking license will disable the script")
-    if input("Confirm revoke (y/n): ").strip().lower() in ['y', 'yes']:
-        try:
-            license_data = load_license_key()
-            hardware_id = license_data.get("hardware_id", get_hardware_id())
-            add_to_blacklist(hardware_id, "License revoked")
-            os.remove(LICENSE_FILE_PATH)
-            print(f"\n{Fore.YELLOW}License revoked{Style.RESET_ALL}")
-            logger.info("Chaos-LIC: License revoked")
-            sys.exit(0)
-        except Exception as e:
-            logger.error(f"Chaos-LIC: Failed to revoke: {str(e)}")
-            print(f"\n{Fore.RED}Failed to revoke license: {str(e)}{Style.RESET_ALL}")
-            sys.exit(1)
-    else:
-        print(f"\n{Fore.YELLOW}Revocation cancelled{Style.RESET_ALL}")
-        logger.info("Chaos-LIC: Revocation cancelled")
-        sys.exit(0)
+        sys.exit(1)
 
 # Autograb Subjects
 def autograb_subjects() -> List[str]:
@@ -1259,16 +1132,27 @@ def main():
         display_owner_info()
         display_instructions()
         parser = argparse.ArgumentParser(description="SMS SERPENT - Chaos Bulk SMS")
-        parser.add_argument("--revoke-license", action="store_true", help="Revoke license")
+        parser.add_argument("--ban-user", type=str, help="Ban a user by user_id")
+        parser.add_argument("--revoke-user", type=str, help="Revoke a user's approval by user_id")
         parser.add_argument("--non-interactive", action="store_true", help="Run in non-interactive mode for startup")
         args = parser.parse_args()
         if args.non_interactive:
             os.environ["STARTUP_MODE"] = "non_interactive"
         chaos_id = chaos_string(5)
         current_time = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d %I:%M %p")
-        is_valid, license_key, expiration_date, days_remaining = validate_license()
-        if not is_valid:
+
+        # Handle ban/revoke commands
+        if args.ban_user:
+            ban_user(args.ban_user, "Banned via command line")
+            sys.exit(0)
+        if args.revoke_user:
+            revoke_user(args.revoke_user, "Revoked via command line")
+            sys.exit(0)
+
+        # Validate approval via Telegram
+        if not validate_approval():
             sys.exit(1)
+
         startup_message = "SMS SERPENT RUNNING"
         terminal_width = shutil.get_terminal_size().columns
         message_length = len(startup_message)
@@ -1279,14 +1163,6 @@ def main():
         print(f"{' ' * padding}{Fore.YELLOW}{Style.BRIGHT}| {' ' * (box_width - message_length - 4)}{startup_message}{' ' * (box_width - message_length - 4)} |{Style.RESET_ALL}")
         print(f"{' ' * padding}{Fore.YELLOW}{Style.BRIGHT}{horizontal_border}{Style.RESET_ALL}")
         logger.info(f"~~~~~~\nStarting SMS SERPENT\n{current_time}\n~~~~~~")
-        if args.revoke_license:
-            revoke_license()
-            return
-        if os.getenv("STARTUP_MODE") != "non_interactive":
-            print(f"\n{Fore.LIGHTBLUE_EX}License Information:{Style.RESET_ALL}")
-            print(f"{Fore.LIGHTBLUE_EX}License Key: {license_key}{Style.RESET_ALL}")
-            print(f"{Fore.LIGHTBLUE_EX}Expiration Date: {expiration_date}{Style.RESET_ALL}")
-            print(f"{Fore.LIGHTBLUE_EX}Days Remaining: {days_remaining}{Style.RESET_ALL}")
 
         if not os.path.exists(CSV_FILE):
             logger.error(f"Chaos-FILE: Numbers file not found: {CSV_FILE}")
