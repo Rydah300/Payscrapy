@@ -38,23 +38,51 @@ try:
     init()
 except ImportError:
     print("Installing colorama...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "colorama"])
-    from colorama import init, Fore, Style
-    init()
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "colorama"])
+        from colorama import init, Fore, Style
+        init()
+    except subprocess.CalledProcessError as e:
+        print(f"{Fore.RED}Failed to install colorama: {str(e)}. Please install manually with 'pip install colorama' and rerun.{Style.RESET_ALL}")
+        sys.exit(1)
 
 try:
     import keyboard
 except ImportError:
     print("Installing keyboard...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "keyboard"])
-    import keyboard
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "keyboard"])
+        import keyboard
+    except subprocess.CalledProcessError as e:
+        print(f"{Fore.RED}Failed to install keyboard: {str(e)}. Please install manually with 'pip install keyboard' and rerun.{Style.RESET_ALL}")
+        sys.exit(1)
 
-# Setup logging to file only (no console output)
-HIDDEN_DIR_NAME = ".chaos-serpent"
-HIDDEN_SUBDIR_NAME = "cache"
-LOG_FILE = None
+# Utility Functions
+def setup_logging():
+    global LOG_FILE
+    try:
+        system = platform.system()
+        if system == "Windows":
+            base_path = os.getenv("APPDATA", os.path.expanduser("~"))
+        elif system == "Linux":
+            base_path = os.path.expanduser("~/.cache")
+        elif system == "Darwin":
+            base_path = os.path.expanduser("~/Library/Caches")
+        else:
+            base_path = os.path.expanduser("~")
+        LOG_FILE = os.path.join(base_path, HIDDEN_DIR_NAME, "serpent.log")
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        logger = logging.getLogger(__name__)
+        logger.setLevel(logging.INFO)
+        file_handler = logging.FileHandler(LOG_FILE)
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+        logger.addHandler(file_handler)
+        logger.addHandler(logging.NullHandler())
+        return logger
+    except Exception as e:
+        print(f"{Fore.RED}Chaos-LOG: Failed to set up logging: {str(e)}{Style.RESET_ALL}")
+        sys.exit(1)
 
-# Hidden Folder Setup
 def get_hidden_folder_path() -> str:
     system = platform.system()
     max_attempts = 3
@@ -87,6 +115,12 @@ def get_hidden_folder_path() -> str:
                     logger.warning(f"Chaos-FILE: Failed to set Windows hidden attribute or permissions: {str(e)}")
             logger.info(f"Created/using hidden folder: {hidden_folder}")
             return hidden_folder
+        except PermissionError:
+            logger.warning(f"Chaos-FILE: Permission denied on attempt {attempt + 1}/{max_attempts}")
+            if attempt == max_attempts - 1:
+                print(f"{Fore.RED}Chaos-FILE: No write permissions for hidden folder. Run as administrator or choose a different location.{Style.RESET_ALL}")
+                sys.exit(1)
+            time.sleep(1)
         except Exception as e:
             logger.warning(f"Chaos-FILE: Attempt {attempt + 1}/{max_attempts} failed to set up hidden folder: {str(e)}")
             if attempt == max_attempts - 1:
@@ -105,6 +139,7 @@ def get_hidden_folder_path() -> str:
                     sys.exit(1)
             time.sleep(1)
 
+# Initialize Logger
 logger = setup_logging()
 
 # Required modules
@@ -126,16 +161,17 @@ def install_missing_modules():
                 subprocess.check_call([sys.executable, "-m", "pip", "install", module])
                 logger.info(f"Installed {module}")
             except subprocess.CalledProcessError as e:
-                logger.error(f"Chaos-DEP: Failed to install {module}: {str(e)}")
-                print(f"{Fore.RED}Chaos-DEP: Failed to install {module}: {str(e)}{Style.RESET_ALL}")
+                print(f"{Fore.RED}Failed to install {module}: {str(e)}. Please install manually with 'pip install {module}' and rerun.{Style.RESET_ALL}")
                 sys.exit(1)
 
 install_missing_modules()
 
-# Telegram and GitHub Gist Configuration
-GITHUB_TOKEN = "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"  # Replace with your actual GitHub PAT
-TELEGRAM_TOKEN = "8364609882:AAFIZerZkAbcdYuRwzdxtjpPxgri_PWLc1M"          # Replace with your actual Telegram Bot Token
-ADMIN_CHAT_ID = "7926187033"                 # Replace with your actual Telegram Chat ID
+# Configuration
+HIDDEN_DIR_NAME = ".chaos-serpent"
+HIDDEN_SUBDIR_NAME = "cache"
+GITHUB_TOKEN = "your_github_personal_access_token"  # Replace with your actual GitHub PAT
+TELEGRAM_TOKEN = "your_telegram_bot_token"          # Replace with your actual Telegram Bot Token
+ADMIN_CHAT_ID = "your_chat_id"                     # Replace with your actual Telegram Chat ID
 USER_ID_FILE = os.path.join(get_hidden_folder_path(), ".user_id")
 USER_ID_HASH_FILE = os.path.join(get_hidden_folder_path(), ".user_id_hash")
 CHECK_INTERVAL = 5
@@ -155,10 +191,6 @@ AUTOGRAB_DATA = {
 }
 
 USA_TIMEZONES = ["US/Eastern", "US/Central", "US/Mountain", "US/Pacific"]
-
-# Configuration
-CHAOS_SEED = random.randint(1, 1000000)
-random.seed(CHAOS_SEED)
 CSV_FILE = "numbers.txt"
 AUTOGRAB_LINKS_FILE = "autograb_links.json"
 LINKS_FILE = "links.txt"
@@ -314,7 +346,7 @@ def send_approval_request(user_id: str, user_info: Dict[str, str]):
         f"Username: {user_info['username']}\n"
         f"Device Fingerprint: {user_info['device_fingerprint'][:10]}...\n"
         f"Time: {user_info['timestamp']} (WAT)\n"
-        f"Reply with /approve_{user_id}, /deny_{user_id}, /ban_{user_id}, or /revoke_{user_id}"
+        f"Reply with /approve_{user_id}_{LICENSE_VALIDITY_DAYS}, /deny_{user_id}, /ban_{user_id}, or /revoke_{user_id}"
     )
     license_data = {
         "user_id": user_id,
@@ -323,8 +355,8 @@ def send_approval_request(user_id: str, user_info: Dict[str, str]):
         "user_info": user_info,
         "integrity_hash": hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()[:64],
         "execution_log": {},
-        "license_duration": 0,
-        "days_remaining": 0
+        "license_duration": LICENSE_VALIDITY_DAYS,
+        "days_remaining": LICENSE_VALIDITY_DAYS
     }
     gist_id = create_or_update_gist(user_id, license_data)
     if gist_id:
@@ -463,7 +495,7 @@ def display_license_info(user_id: str, data: Dict):
     print(f"{Fore.MAGENTA}| Last Updated              | {data.get('last_updated', 'N/A')} |{Style.RESET_ALL}")
     print(f"+{Fore.MAGENTA}---------------------------+---------------------{Style.RESET_ALL}+")
 
-# Autograb Subjects
+# Autograb and Display Functions
 def autograb_subjects() -> List[str]:
     return [
         "Update",
@@ -709,6 +741,7 @@ def load_numbers(txt_file: str) -> List[Dict[str, str]]:
         print(f"{Fore.RED}Chaos-NUM: Failed to load numbers: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
+# Configuration Functions
 def get_configs_mode1() -> tuple[List[Dict[str, str]], str, List[str], bool, Optional[str]]:
     if os.getenv("STARTUP_MODE") == "non_interactive":
         smtp_file = "smtp_configs.txt"
@@ -964,6 +997,7 @@ def send_sms(
             time.sleep(retry_delay(attempt))
     return False, timestamp, message[:CONTENT_SNIPPET_LENGTH], subject, score
 
+# Threading and Execution
 paused = False
 pause_event = threading.Event()
 pause_event.set()
@@ -1142,31 +1176,6 @@ def animate_logo():
         return
     print("\033[H\033[J", end="")
     print(SMS_SERPENT_FRAMES[0])
-
-def setup_logging():
-    global LOG_FILE
-    try:
-        system = platform.system()
-        if system == "Windows":
-            base_path = os.getenv("APPDATA", os.path.expanduser("~"))
-        elif system == "Linux":
-            base_path = os.path.expanduser("~/.cache")
-        elif system == "Darwin":
-            base_path = os.path.expanduser("~/Library/Caches")
-        else:
-            base_path = os.path.expanduser("~")
-        LOG_FILE = os.path.join(base_path, HIDDEN_DIR_NAME, "serpent.log")
-        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-        logger = logging.getLogger(__name__)
-        logger.setLevel(logging.INFO)
-        file_handler = logging.FileHandler(LOG_FILE)
-        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
-        logger.addHandler(file_handler)
-        logger.addHandler(logging.NullHandler())
-        return logger
-    except Exception as e:
-        print(f"{Fore.RED}Chaos-LOG: Failed to set up logging: {str(e)}{Style.RESET_ALL}")
-        sys.exit(1)
 
 def main():
     try:
