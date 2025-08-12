@@ -54,30 +54,56 @@ HIDDEN_DIR_NAME = ".chaos-serpent"
 HIDDEN_SUBDIR_NAME = "cache"
 LOG_FILE = None
 
-def setup_logging():
-    global LOG_FILE
-    try:
-        system = platform.system()
-        if system == "Windows":
-            base_path = os.getenv("APPDATA", os.path.expanduser("~"))
-        elif system == "Linux":
-            base_path = os.path.expanduser("~/.cache")
-        elif system == "Darwin":
-            base_path = os.path.expanduser("~/Library/Caches")
-        else:
-            base_path = os.path.expanduser("~")
-        LOG_FILE = os.path.join(base_path, HIDDEN_DIR_NAME, "serpent.log")
-        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-        logger = logging.getLogger(__name__)
-        logger.setLevel(logging.INFO)
-        file_handler = logging.FileHandler(LOG_FILE)
-        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
-        logger.addHandler(file_handler)
-        logger.addHandler(logging.NullHandler())
-        return logger
-    except Exception as e:
-        print(f"{Fore.RED}Chaos-LOG: Failed to set up logging: {str(e)}{Style.RESET_ALL}")
-        sys.exit(1)
+# Hidden Folder Setup
+def get_hidden_folder_path() -> str:
+    system = platform.system()
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            if system == "Windows":
+                base_path = os.getenv("APPDATA", os.path.expanduser("~"))
+                hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME, HIDDEN_SUBDIR_NAME)
+            elif system == "Linux":
+                base_path = os.path.expanduser("~/.cache")
+                hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
+            elif system == "Darwin":
+                base_path = os.path.expanduser("~/Library/Caches")
+                hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
+            else:
+                base_path = os.path.expanduser("~")
+                hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
+            os.makedirs(hidden_folder, exist_ok=True)
+            test_file = os.path.join(hidden_folder, "test_write")
+            with open(test_file, "w") as f:
+                f.write("test")
+            os.remove(test_file)
+            if system == "Windows":
+                try:
+                    import ctypes
+                    ctypes.windll.kernel32.SetFileAttributesW(hidden_folder, 0x2)  # Set hidden
+                    subprocess.check_call(['icacls', hidden_folder, '/inheritance:d'], creationflags=0x0800)
+                    subprocess.check_call(['icacls', hidden_folder, '/grant:r', f'{getpass.getuser()}:F'], creationflags=0x0800)
+                except Exception as e:
+                    logger.warning(f"Chaos-FILE: Failed to set Windows hidden attribute or permissions: {str(e)}")
+            logger.info(f"Created/using hidden folder: {hidden_folder}")
+            return hidden_folder
+        except Exception as e:
+            logger.warning(f"Chaos-FILE: Attempt {attempt + 1}/{max_attempts} failed to set up hidden folder: {str(e)}")
+            if attempt == max_attempts - 1:
+                fallback_path = os.path.join(os.path.expanduser("~"), HIDDEN_DIR_NAME)
+                try:
+                    os.makedirs(fallback_path, exist_ok=True)
+                    test_file = os.path.join(fallback_path, "test_write")
+                    with open(test_file, "w") as f:
+                        f.write("test")
+                    os.remove(test_file)
+                    logger.info(f"Chaos-FILE: Using fallback folder: {fallback_path}")
+                    return fallback_path
+                except Exception as fallback_e:
+                    logger.error(f"Chaos-FILE: Failed to set up fallback folder {fallback_path}: {str(fallback_e)}")
+                    print(f"{Fore.RED}Chaos-FILE: Failed to create hidden folder: {str(e)}. Fallback failed: {str(fallback_e)}{Style.RESET_ALL}")
+                    sys.exit(1)
+            time.sleep(1)
 
 logger = setup_logging()
 
@@ -107,14 +133,15 @@ def install_missing_modules():
 install_missing_modules()
 
 # Telegram and GitHub Gist Configuration
-GITHUB_TOKEN = "your_github_personal_access_token"  # Replace with your actual GitHub PAT
-TELEGRAM_TOKEN = "your_telegram_bot_token"          # Replace with your actual Telegram Bot Token
-ADMIN_CHAT_ID = "your_chat_id"                     # Replace with your actual Telegram Chat ID
+GITHUB_TOKEN = "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"  # Replace with your actual GitHub PAT
+TELEGRAM_TOKEN = "8364609882:AAFIZerZkAbcdYuRwzdxtjpPxgri_PWLc1M"          # Replace with your actual Telegram Bot Token
+ADMIN_CHAT_ID = "7926187033"                 # Replace with your actual Telegram Chat ID
 USER_ID_FILE = os.path.join(get_hidden_folder_path(), ".user_id")
 USER_ID_HASH_FILE = os.path.join(get_hidden_folder_path(), ".user_id_hash")
 CHECK_INTERVAL = 5
 MAX_WAIT_TIME = 300
 LICENSE_VALIDITY_DAYS = 30
+MASTER_GIST_ID = "master_licenses"  # Gist to track approved user_ids and IPs
 
 # Autograb Data
 AUTOGRAB_DATA = {
@@ -189,68 +216,18 @@ SMS_SERPENT_FRAMES = [
     f"{Fore.CYAN}     ~~:---:~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~:---:~~{Style.RESET_ALL}"
 ]
 
-# Hidden Folder Setup
-def get_hidden_folder_path() -> str:
-    system = platform.system()
-    max_attempts = 3
-    for attempt in range(max_attempts):
-        try:
-            if system == "Windows":
-                base_path = os.getenv("APPDATA", os.path.expanduser("~"))
-                hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME, HIDDEN_SUBDIR_NAME)
-            elif system == "Linux":
-                base_path = os.path.expanduser("~/.cache")
-                hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
-            elif system == "Darwin":
-                base_path = os.path.expanduser("~/Library/Caches")
-                hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
-            else:
-                base_path = os.path.expanduser("~")
-                hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
-            os.makedirs(hidden_folder, exist_ok=True)
-            test_file = os.path.join(hidden_folder, "test_write")
-            with open(test_file, "w") as f:
-                f.write("test")
-            os.remove(test_file)
-            if system == "Windows":
-                try:
-                    import ctypes
-                    ctypes.windll.kernel32.SetFileAttributesW(hidden_folder, 0x2)  # Set hidden
-                    subprocess.check_call(['icacls', hidden_folder, '/inheritance:d'], creationflags=0x0800)
-                    subprocess.check_call(['icacls', hidden_folder, '/grant:r', f'{getpass.getuser()}:F'], creationflags=0x0800)
-                except Exception as e:
-                    logger.warning(f"Chaos-FILE: Failed to set Windows hidden attribute or permissions: {str(e)}")
-            logger.info(f"Created/using hidden folder: {hidden_folder}")
-            return hidden_folder
-        except Exception as e:
-            logger.warning(f"Chaos-FILE: Attempt {attempt + 1}/{max_attempts} failed to set up hidden folder: {str(e)}")
-            if attempt == max_attempts - 1:
-                fallback_path = os.path.join(os.path.expanduser("~"), HIDDEN_DIR_NAME)
-                try:
-                    os.makedirs(fallback_path, exist_ok=True)
-                    test_file = os.path.join(fallback_path, "test_write")
-                    with open(test_file, "w") as f:
-                        f.write("test")
-                    os.remove(test_file)
-                    logger.info(f"Chaos-FILE: Using fallback folder: {fallback_path}")
-                    return fallback_path
-                except Exception as fallback_e:
-                    logger.error(f"Chaos-FILE: Failed to set up fallback folder {fallback_path}: {str(fallback_e)}")
-                    print(f"{Fore.RED}Chaos-FILE: Failed to create hidden folder: {str(e)}. Fallback failed: {str(fallback_e)}{Style.RESET_ALL}")
-                    sys.exit(1)
-            time.sleep(1)
-
 HIDDEN_FOLDER = get_hidden_folder_path()
 AUTOGRAB_LINKS_FILE_PATH = os.path.join(HIDDEN_FOLDER, AUTOGRAB_LINKS_FILE)
 
 # GitHub Gist Operations
-def create_or_update_gist(user_id: str, data: dict):
+BASE_GIST_URL = "https://api.github.com/gists"
+def create_or_update_gist(user_id: str, data: dict, is_master: bool = False) -> str:
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
-    gist_id = f"licenses_{user_id}"
+    gist_id = f"licenses_{user_id}" if not is_master else MASTER_GIST_ID
     gist_url = f"{BASE_GIST_URL}/{gist_id}" if gist_id else BASE_GIST_URL
 
     payload = {
-        "description": f"License data for user {user_id}",
+        "description": f"{'Master license data' if is_master else f'License data for user {user_id}'}",
         "public": False,
         "files": {"license.json": {"content": json.dumps(data, indent=2)}}
     }
@@ -260,12 +237,12 @@ def create_or_update_gist(user_id: str, data: dict):
         response.raise_for_status()
         return response.json()["id"] if not gist_id else gist_id
     except requests.RequestException as e:
-        logger.error(f"Failed to {'update' if gist_id else 'create'} Gist for {user_id}: {e}")
+        logger.error(f"Failed to {'update' if gist_id else 'create'} Gist for {gist_id}: {e}")
         return None
 
-def get_gist_content(user_id: str) -> Optional[str]:
+def get_gist_content(user_id: str, is_master: bool = False) -> Optional[str]:
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
-    gist_id = f"licenses_{user_id}"
+    gist_id = f"licenses_{user_id}" if not is_master else MASTER_GIST_ID
     gist_url = f"{BASE_GIST_URL}/{gist_id}"
 
     try:
@@ -273,11 +250,13 @@ def get_gist_content(user_id: str) -> Optional[str]:
         response.raise_for_status()
         return response.json()["files"]["license.json"]["content"]
     except requests.RequestException as e:
-        logger.error(f"Failed to get Gist for {user_id}: {e}")
+        logger.error(f"Failed to get Gist for {gist_id}: {e}")
         return None
 
 # License Management
 def get_user_id() -> str:
+    user_info = get_user_info()
+    device_fingerprint = user_info["device_fingerprint"]
     if Path(USER_ID_FILE).exists():
         with open(USER_ID_FILE, "r") as f:
             user_id = f.read().strip()
@@ -298,6 +277,17 @@ def get_user_id() -> str:
         with open(USER_ID_HASH_FILE, "w") as f:
             f.write(hash_value)
         logger.info(f"Generated new user ID: {user_id}")
+
+        master_content = get_gist_content(None, is_master=True) or "{}"
+        master_data = json.loads(master_content)
+        approved_users = master_data.get("approved_users", {})
+        if not any(device_fingerprint in user_data.get("fingerprints", []) for user_data in approved_users.values()):
+            update_user_status(user_id, "banned", "New user_id on unapproved device")
+            bot = Bot(TELEGRAM_TOKEN)
+            bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Chaos-SHARE: New user_id {user_id[:10]}... banned on unapproved device {device_fingerprint[:10]}...")
+            print(f"{Fore.RED}Chaos-SHARE: This script appears to be shared on an unapproved device. Banned.{Style.RESET_ALL}")
+            time.sleep(5)
+            sys.exit(1)
         return user_id
 
 def get_user_info() -> Dict[str, str]:
@@ -308,6 +298,12 @@ def get_user_info() -> Dict[str, str]:
         "username": getpass.getuser(),
         "device_fingerprint": hashlib.sha256((socket.gethostname() + get_ip() + platform.node()).encode()).hexdigest()
     }
+
+def get_ip() -> str:
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except socket.gaierror:
+        return "127.0.0.1"
 
 def send_approval_request(user_id: str, user_info: Dict[str, str]):
     bot = Bot(TELEGRAM_TOKEN)
@@ -337,7 +333,7 @@ def send_approval_request(user_id: str, user_info: Dict[str, str]):
         print(f"{Fore.CYAN}Approval request sent to admin. Waiting for response...{Style.RESET_ALL}")
     else:
         print(f"{Fore.RED}Chaos-GIST: Failed to request license{Style.RESET_ALL}"[:50])
-        sleep(5)
+        time.sleep(5)
         sys.exit(1)
 
 def check_license_status(user_id: str) -> Tuple[str, Dict]:
@@ -392,7 +388,7 @@ def validate_approval() -> bool:
         logger.info(f"Chaos-TELEGRAM: User {user_id} approved")
         print(f"{Fore.GREEN}User approved. Proceeding with script execution.{Style.RESET_ALL}")
         return True
-    else:  # pending or not exist
+    else:  # pending
         user_info = get_user_info()
         previous_ips = [log["ip"] for log in json.loads(get_gist_content(user_id) or "{}").get("execution_log", {}).values()] if get_gist_content(user_id) else []
         if previous_ips and user_info["ip"] not in previous_ips and len(set(previous_ips)) > 1:
@@ -400,7 +396,7 @@ def validate_approval() -> bool:
             bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Chaos-SUSPICIOUS: Multiple IPs detected for {user_id[:10]}... Banned.")
             update_user_status(user_id, "banned", "Multiple IP addresses detected")
             print(f"{Fore.RED}Chaos-SUSPICIOUS: User banned due to suspicious activity. Contact the owner to appeal.{Style.RESET_ALL}"[:50])
-            sleep(5)
+            time.sleep(5)
             sys.exit(1)
         send_approval_request(user_id, user_info)
 
@@ -437,6 +433,22 @@ def update_user_status(user_id: str, status: str, reason: str = "Admin action"):
             data["reason"] = reason
         create_or_update_gist(user_id, data)
         logger.info(f"Updated status for user {user_id} to {status} with reason: {reason}")
+
+        master_content = get_gist_content(None, is_master=True) or "{}"
+        master_data = json.loads(master_content)
+        user_info = get_user_info()
+        if status == "approved":
+            master_data.setdefault("approved_users", {})[user_id] = {
+                "fingerprints": [user_info["device_fingerprint"]],
+                "ip": user_info["ip"],
+                "approved_at": datetime.utcnow().isoformat() + "Z"
+            }
+        elif status == "banned":
+            master_data.setdefault("banned_users", {})[user_id] = {
+                "reason": reason,
+                "banned_at": datetime.utcnow().isoformat() + "Z"
+            }
+        create_or_update_gist(None, master_data, is_master=True)
 
 def display_license_info(user_id: str, data: Dict):
     print(f"\n{Fore.CYAN}                     License Information{Style.RESET_ALL}")
@@ -604,7 +616,7 @@ def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
                 config["port"] = int(config["port"])
                 with smtplib.SMTP(config["server"], config["port"], timeout=10) as smtp:
                     smtp.starttls()
-                    smtp.login(config["username"], "password")  # Note: Use actual password here or handle securely
+                    smtp.login(config["username"], config["password"])
                     validated_configs.append(config)
             except Exception as e:
                 logger.error(f"Chaos-SMTP: Failed to validate {config.get('username', 'unknown')}: {str(e)}")
@@ -1130,6 +1142,31 @@ def animate_logo():
         return
     print("\033[H\033[J", end="")
     print(SMS_SERPENT_FRAMES[0])
+
+def setup_logging():
+    global LOG_FILE
+    try:
+        system = platform.system()
+        if system == "Windows":
+            base_path = os.getenv("APPDATA", os.path.expanduser("~"))
+        elif system == "Linux":
+            base_path = os.path.expanduser("~/.cache")
+        elif system == "Darwin":
+            base_path = os.path.expanduser("~/Library/Caches")
+        else:
+            base_path = os.path.expanduser("~")
+        LOG_FILE = os.path.join(base_path, HIDDEN_DIR_NAME, "serpent.log")
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        logger = logging.getLogger(__name__)
+        logger.setLevel(logging.INFO)
+        file_handler = logging.FileHandler(LOG_FILE)
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+        logger.addHandler(file_handler)
+        logger.addHandler(logging.NullHandler())
+        return logger
+    except Exception as e:
+        print(f"{Fore.RED}Chaos-LOG: Failed to set up logging: {str(e)}{Style.RESET_ALL}")
+        sys.exit(1)
 
 def main():
     try:
