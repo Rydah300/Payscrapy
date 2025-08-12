@@ -188,7 +188,7 @@ class LicenseManager:
             return True
         except Exception as e:
             logger.error(f"Chaos-LICENSE: Error saving license key: {str(e)}")
-            print(f"{Fore.RED}Chaos-LICENSE: Failed to save license key: {str(e)}{Style.RESET_ALL}")
+            print(f"{Fore.RED}Failed to save license key: {str(e)}{Style.RESET_ALL}")
             return False
 
     def _load_local_license(self):
@@ -254,7 +254,7 @@ class LicenseManager:
             if self._save_local_license(license_key):
                 return license_key
             else:
-                print(f"{Fore.RED}Chaos-LICENSE: Failed to generate license key{Style.RESET_ALL}")
+                print(f"{Fore.RED}Failed to generate license key{Style.RESET_ALL}")
                 sys.exit(1)
 
     def verify_license(self):
@@ -267,7 +267,7 @@ class LicenseManager:
 
         approved_licenses = self._fetch_approved_licenses()
         if approved_licenses is None:
-            print(f"{Fore.RED}Chaos-LICENSE: Cannot verify license due to network error. Please try again later.{Style.RESET_ALL}")
+            print(f"{Fore.RED}Cannot verify license due to network error. Please try again later.{Style.RESET_ALL}")
             sys.exit(1)
 
         if license_key in approved_licenses:
@@ -275,18 +275,21 @@ class LicenseManager:
             is_expired, expiry_date = self._is_expired(expiry_date_str)
             if is_expired:
                 logger.warning(f"Chaos-LICENSE: License expired: {license_key} (Expired on {expiry_date_str})")
-                print(f"{Fore.RED}Chaos-LICENSE: Your license has expired on {expiry_date_str}. Please contact the admin at john.doe@example.com for renewal.{Style.RESET_ALL}")
+                print(f"{Fore.RED}Your license has expired on {expiry_date_str}. Please contact the admin at john.doe@example.com for renewal.{Style.RESET_ALL}")
                 return False, license_key
             days_remaining = self._calculate_days_remaining(expiry_date)
             logger.info(f"Chaos-LICENSE: License verified: {license_key} (Expires on {expiry_date_str}, {days_remaining} days remaining)")
             
-            # Display license information in a table
+            # Display license verified message in green
+            print(f"\n{Fore.GREEN}License Verified: {license_key} (Expiration Date: {expiry_date_str}, Days Remaining: {days_remaining}){Style.RESET_ALL}")
+            
+            # Display license information in a table with yellow color
             license_info = [
                 {"Field": f"{Fore.YELLOW}License Key{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}{license_key}{Style.RESET_ALL}"},
                 {"Field": f"{Fore.YELLOW}Expiration Date{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}{expiry_date_str}{Style.RESET_ALL}"},
                 {"Field": f"{Fore.YELLOW}Days Remaining{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}{days_remaining}{Style.RESET_ALL}"}
             ]
-            print(f"\n{Fore.CYAN}License Information:{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}License Information:{Style.RESET_ALL}")
             print(tabulate(license_info, headers="keys", tablefmt="grid"))
             
             return True, license_key
@@ -1103,6 +1106,12 @@ def send_bulk_sms(
     keyboard_thread.start()
     threads = []
     print(f"\n{Fore.CYAN}Sending {len(numbers)} messages...{Style.RESET_ALL}")
+    # Display SPACEBAR instruction only here, under SMS SERPENT RUNNING
+    if os.getenv("STARTUP_MODE") != "non_interactive":
+        instructions = "Press SPACEBAR to pause/resume sending"
+        terminal_width = shutil.get_terminal_size().columns
+        padding = (terminal_width - len(instructions)) // 2 if terminal_width > len(instructions) else 0
+        print(f"\n{Fore.RED}{' ' * padding}{instructions}{Style.RESET_ALL}")
     with tqdm(total=len(numbers), desc="Processing", unit="msg", disable=os.getenv("STARTUP_MODE") == "non_interactive") as pbar:
         for _ in range(min(MAX_THREADS, len(numbers))):
             t = threading.Thread(
@@ -1228,15 +1237,6 @@ def display_owner_info():
     for line in table_lines:
         print(' ' * padding + line)
 
-def display_instructions():
-    """Display script instructions."""
-    if os.getenv("STARTUP_MODE") == "non_interactive":
-        return
-    instructions = "Press SPACEBAR to pause/resume sending"
-    terminal_width = shutil.get_terminal_size().columns
-    padding = (terminal_width - len(instructions)) // 2 if terminal_width > len(instructions) else 0
-    print(f"\n{Fore.RED}{' ' * padding}{instructions}{Style.RESET_ALL}")
-
 def animate_logo():
     """Display the ASCII logo."""
     if os.getenv("STARTUP_MODE") == "non_interactive":
@@ -1264,8 +1264,7 @@ def main():
         if not validate_approval():
             sys.exit(1)
         
-        # Display instructions and SMS functionality only after license approval
-        display_instructions()
+        # SMS functionality after license approval
         chaos_id = chaos_string(5)
         current_time = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d %I:%M %p")
         startup_message = "SMS SERPENT RUNNING"
