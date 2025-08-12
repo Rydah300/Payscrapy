@@ -64,7 +64,7 @@ except ImportError:
 # Configuration Constants
 HIDDEN_DIR_NAME = ".chaos-serpent"
 HIDDEN_SUBDIR_NAME = "cache"
-GITHUB_REPO = "Rydah300/Payscrapy"
+GITHUB_REPO = "Rydah300/Smoako"
 LICENSE_FILE_PATH = "licenses.txt"
 GITHUB_LICENSE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{LICENSE_FILE_PATH}"
 CHECK_INTERVAL = 5
@@ -280,7 +280,7 @@ class LicenseManager:
             days_remaining = self._calculate_days_remaining(expiry_date)
             logger.info(f"Chaos-LICENSE: License verified: {license_key} (Expires on {expiry_date_str}, {days_remaining} days remaining)")
             
-            # Display license verified message in green
+            # Display single license verified message in green
             print(f"\n{Fore.GREEN}License Verified: {license_key} (Expiration Date: {expiry_date_str}, Days Remaining: {days_remaining}){Style.RESET_ALL}")
             
             # Display license information in a table with yellow color
@@ -328,7 +328,7 @@ def is_rdp_session() -> bool:
         return False
 
 def setup_logging():
-    """Set up logging with fallback for RDP and normal PC environments."""
+    """Set up logging with fallback for RDP and normal PC environments, ensuring no console output."""
     global LOG_FILE
     try:
         system = platform.system()
@@ -355,17 +355,21 @@ def setup_logging():
         os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.INFO)
+        # Remove any existing handlers to prevent duplicate logging
+        logger.handlers.clear()
+        # File handler for logging to serpent.log
         file_handler = logging.FileHandler(LOG_FILE)
         file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
         logger.addHandler(file_handler)
-        logger.addHandler(logging.NullHandler())
+        # Explicitly avoid console output by not adding StreamHandler
         logger.info(f"Chaos-LOG: Logging initialized in {'RDP' if is_rdp else 'Normal'} environment")
         return logger
     except Exception as e:
-        print(f"{Fore.RED}Chaos-LOG: Failed to set up logging: {str(e)}. Using console logging.{Style.RESET_ALL}")
+        print(f"{Fore.RED}Chaos-LOG: Failed to set up logging: {str(e)}. Using minimal logging.{Style.RESET_ALL}")
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.INFO)
-        logger.addHandler(logging.StreamHandler())
+        logger.handlers.clear()
+        logger.addHandler(logging.NullHandler())
         return logger
 
 def get_hidden_folder_path() -> str:
