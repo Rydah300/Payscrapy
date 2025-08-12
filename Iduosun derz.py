@@ -64,7 +64,7 @@ except ImportError:
 # Configuration Constants
 HIDDEN_DIR_NAME = ".chaos-serpent"
 HIDDEN_SUBDIR_NAME = "cache"
-GITHUB_REPO = "Rydah300/Smoako"
+GITHUB_REPO = "Rydah300/Payscrapy"
 LICENSE_FILE_PATH = "licenses.txt"
 GITHUB_LICENSE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{LICENSE_FILE_PATH}"
 CHECK_INTERVAL = 5
