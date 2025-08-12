@@ -31,6 +31,7 @@ import getpass
 import requests
 import socket
 from pathlib import Path
+from telegram import Bot
 
 try:
     from colorama import init, Fore, Style
@@ -105,34 +106,26 @@ def install_missing_modules():
 
 install_missing_modules()
 
-# Telegram Bot Configuration
-BOT_TOKEN = "YOUR_BOT_TOKEN"  # Replace with your bot token from BotFather
-ADMIN_CHAT_ID = "YOUR_ADMIN_CHAT_ID"  # Your Telegram user ID
-USERS_FILE = os.path.join(get_hidden_folder_path(), "users.json")  # File to store user statuses
-USER_ID_FILE = os.path.join(get_hidden_folder_path(), ".user_id")  # Local file for persistent user ID
-USER_ID_HASH_FILE = os.path.join(get_hidden_folder_path(), ".user_id_hash")  # Hash for .user_id
-CHECK_INTERVAL = 5  # Seconds to wait between status checks
-MAX_WAIT_TIME = 300  # Maximum wait time for approval (5 minutes)
-TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-LICENSE_VALIDITY_DAYS = 30  # Expiration days for approval
+# Telegram and GitHub Gist Configuration
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")  # Replace with your bot token from BotFather
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")  # Your Telegram user ID
+BASE_GIST_URL = "https://api.github.com/gists"
+USER_ID_FILE = os.path.join(get_hidden_folder_path(), ".user_id")
+USER_ID_HASH_FILE = os.path.join(get_hidden_folder_path(), ".user_id_hash")
+CHECK_INTERVAL = 5
+MAX_WAIT_TIME = 300
+LICENSE_VALIDITY_DAYS = 30
 
 # Autograb Data
 AUTOGRAB_DATA = {
-    "BANK": [
-        "Chase", "Wells Fargo", "BofA", "U.S. Bank", "PNC", "Truist", "Regions", "TD Bank",
-        "Fifth Third", "Citizens", "Huntington", "BMO", "KeyBank", "M&T", "Citibank",
-        "First Citizens", "First Horizon", "Santander", "Comerica", "Flagstar",
-        "Navy FCU", "PenFed", "BECU", "Alliant", "Connexus", "DCU", "First Tech",
-        "Golden 1", "SchoolsFirst", "Patelco", "Suncoast", "Security Service",
-        "Bethpage", "LMCU", "Mountain America", "America First", "VyStar", "RBFCU",
-        "Delta Community", "OnPoint"
-    ],
-    "AMOUNT": ["$50", "$100", "$200", "$500", "$1000", "$25", "$75", "$150", "$250", "$750"],
-    "CITY": ["New York", "Los Angeles", "Chicago", "Houston", "Miami", "San Francisco", "Dallas", "Philadelphia", "Seattle", "Atlanta"],
-    "STORE": ["Walmart", "Target", "Costco", "Kroger", "Home Depot", "CVS", "Walgreens", "Best Buy", "Macy’s", "Kohl’s"],
-    "COMPANY": ["Amazon", "Apple", "Google", "Microsoft", "Walmart", "Tesla", "JPMorgan", "Goldman Sachs", "Pfizer", "Coca-Cola"],
-    "IP": ["192.168.1.100", "172.16.254.1", "198.51.100.10", "203.0.113.5", "10.0.0.138", "142.250.190.78", "104.244.42.65", "216.58.194.174", "151.101.1.69", "199.232.68.133"],
-    "ZIP CODE": ["10001", "60601", "90001", "77002", "33101", "94102", "75201", "19103", "98101", "30303"]
+    "BANK": ["Chase", "Wells Fargo", "BofA", "U.S. Bank", "PNC", "Truist", "Regions", "TD Bank"],
+    "AMOUNT": ["$50", "$100", "$200", "$500", "$1000", "$25", "$75", "$150"],
+    "CITY": ["New York", "Los Angeles", "Chicago", "Houston", "Miami", "San Francisco"],
+    "STORE": ["Walmart", "Target", "Costco", "Kroger", "Home Depot", "CVS"],
+    "COMPANY": ["Amazon", "Apple", "Google", "Microsoft", "Walmart", "Tesla"],
+    "IP": ["192.168.1.100", "172.16.254.1", "198.51.100.10", "203.0.113.5"],
+    "ZIP CODE": ["10001", "60601", "90001", "77002", "33101", "94102"]
 }
 
 USA_TIMEZONES = ["US/Eastern", "US/Central", "US/Mountain", "US/Pacific"]
@@ -251,9 +244,41 @@ def get_hidden_folder_path() -> str:
 HIDDEN_FOLDER = get_hidden_folder_path()
 AUTOGRAB_LINKS_FILE_PATH = os.path.join(HIDDEN_FOLDER, AUTOGRAB_LINKS_FILE)
 
-# Telegram Approval Functions
+# GitHub Gist Operations
+def create_or_update_gist(user_id: str, data: dict):
+    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    gist_id = f"licenses_{user_id}"
+    gist_url = f"{BASE_GIST_URL}/{gist_id}" if gist_id else BASE_GIST_URL
+
+    payload = {
+        "description": f"License data for user {user_id}",
+        "public": False,
+        "files": {"license.json": {"content": json.dumps(data, indent=2)}}
+    }
+
+    try:
+        response = requests.patch(gist_url, headers=headers, json=payload) if gist_id else requests.post(BASE_GIST_URL, headers=headers, json=payload)
+        response.raise_for_status()
+        return response.json()["id"] if not gist_id else gist_id
+    except requests.RequestException as e:
+        logger.error(f"Failed to {'update' if gist_id else 'create'} Gist for {user_id}: {e}")
+        return None
+
+def get_gist_content(user_id: str) -> Optional[str]:
+    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    gist_id = f"licenses_{user_id}"
+    gist_url = f"{BASE_GIST_URL}/{gist_id}"
+
+    try:
+        response = requests.get(gist_url, headers=headers)
+        response.raise_for_status()
+        return response.json()["files"]["license.json"]["content"]
+    except requests.RequestException as e:
+        logger.error(f"Failed to get Gist for {user_id}: {e}")
+        return None
+
+# License Management
 def get_user_id() -> str:
-    """Generate or load a persistent user ID for this machine/user."""
     if Path(USER_ID_FILE).exists():
         with open(USER_ID_FILE, "r") as f:
             user_id = f.read().strip()
@@ -277,119 +302,77 @@ def get_user_id() -> str:
         return user_id
 
 def get_user_info() -> Dict[str, str]:
-    """Collect user information for approval request."""
     return {
         "ip": get_ip(),
         "hostname": socket.gethostname(),
         "timestamp": datetime.now().isoformat(),
-        "username": getpass.getuser()
+        "username": getpass.getuser(),
+        "device_fingerprint": hashlib.sha256((socket.gethostname() + get_ip() + platform.node()).encode()).hexdigest()
     }
 
-def get_ip() -> str:
-    """Get the machine's IP address."""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "unknown_ip"
-
 def send_approval_request(user_id: str, user_info: Dict[str, str]):
-    """Send approval request to Telegram bot."""
+    bot = Bot(TELEGRAM_TOKEN)
     message = (
         f"New script execution request from user {user_id}:\n"
         f"IP: {user_info['ip']}\n"
         f"Hostname: {user_info['hostname']}\n"
         f"Username: {user_info['username']}\n"
-        f"Time: {user_info['timestamp']}\n"
-        f"Reply with /approve_{user_id} , /deny_{user_id} , /ban_{user_id} , or /revoke_{user_id}"
+        f"Device Fingerprint: {user_info['device_fingerprint'][:10]}...\n"
+        f"Time: {user_info['timestamp']} (WAT)\n"
+        f"Reply with /approve_{user_id}, /deny_{user_id}, /ban_{user_id}, or /revoke_{user_id}"
     )
-    payload = {
-        "chat_id": ADMIN_CHAT_ID,
-        "text": message
+    license_data = {
+        "user_id": user_id,
+        "status": "pending",
+        "last_updated": datetime.utcnow().isoformat() + "Z",
+        "user_info": user_info,
+        "integrity_hash": hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()[:64],
+        "execution_log": {},
+        "license_duration": 0,
+        "days_remaining": 0
     }
-    try:
-        response = requests.post(TELEGRAM_API, json=payload)
-        response.raise_for_status()
-        logger.info(f"Approval request sent for user {user_id}")
+    gist_id = create_or_update_gist(user_id, license_data)
+    if gist_id:
+        bot.send_message(chat_id=ADMIN_CHAT_ID, text=message)
+        logger.info(f"Approval request sent for user {user_id} at {datetime.now().strftime('%I:%M %p WAT')}")
         print(f"{Fore.CYAN}Approval request sent to admin. Waiting for response...{Style.RESET_ALL}")
-    except Exception as e:
-        logger.error(f"Chaos-TELEGRAM: Failed to send approval request for {user_id}: {str(e)}")
-        print(f"{Fore.RED}Chaos-TELEGRAM: Failed to send approval request: {str(e)}{Style.RESET_ALL}")
+    else:
+        print(f"{Fore.RED}Chaos-GIST: Failed to request license{Style.RESET_ALL}"[:50])
+        sleep(5)
         sys.exit(1)
 
-def check_user_status(user_id: str) -> str:
-    """Check the user's status in the JSON file with tamper check."""
-    if not Path(USERS_FILE).exists():
-        return "pending"
-    with open(USERS_FILE, "r") as f:
-        try:
-            data = json.load(f)
-            stored_hash = data.pop("integrity_hash", None)
-            expected_hash = hashlib.sha256(json.dumps(data, sort_keys=True).encode() + SECRET_SALT.encode()).hexdigest()
-            if stored_hash != expected_hash:
-                logger.error(f"Chaos-TAMPER: Users file tampered")
-                print(f"{Fore.RED}Users file tampered. Exiting.{Style.RESET_ALL}")
-                sys.exit(1)
-            users = data
-            return users.get(user_id, {"status": "pending"})["status"]
-        except json.JSONDecodeError:
-            logger.error(f"Chaos-TELEGRAM: Failed to parse {USERS_FILE}")
-            return "pending"
+def check_license_status(user_id: str) -> Tuple[str, Dict]:
+    content = get_gist_content(user_id)
+    if content:
+        data = json.loads(content)
+        if data.get("status") == "approved" and data.get("days_remaining", 0) > 0:
+            expiration = datetime.strptime(data["last_updated"], "%Y-%m-%dT%H:%M:%SZ") + timedelta(days=data["license_duration"])
+            data["days_remaining"] = max(0, (expiration - datetime.utcnow()).days)
+            create_or_update_gist(user_id, data)
+        return data.get("status", "pending"), data
+    return "pending", {}
 
-def init_users_file():
-    """Initialize the users file if it doesn't exist with integrity hash."""
-    if not Path(USERS_FILE).exists():
-        os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
-        data = {}
-        hash_value = hashlib.sha256(json.dumps(data, sort_keys=True).encode() + SECRET_SALT.encode()).hexdigest()
-        data["integrity_hash"] = hash_value
-        with open(USERS_FILE, "w") as f:
-            json.dump(data, f, indent=4)
-        logger.info(f"Created users file: {USERS_FILE}")
-
-def update_user_status(user_id: str, status: str):
-    """Update the user's status in the JSON file with integrity hash."""
-    init_users_file()
-    with open(USERS_FILE, "r+") as f:
-        data = json.load(f)
-        data.pop("integrity_hash", None)  # Remove old hash for calculation
-        if user_id not in data:
-            data[user_id] = {}
-        data[user_id]["status"] = status
-        if status == "approved":
-            data[user_id]["approval_date"] = datetime.now().isoformat()
-        data[user_id]["last_updated"] = datetime.now().isoformat()
-        # Compute new hash
-        hash_value = hashlib.sha256(json.dumps(data, sort_keys=True).encode() + SECRET_SALT.encode()).hexdigest()
-        data["integrity_hash"] = hash_value
-        f.seek(0)
-        json.dump(data, f, indent=4)
-        f.truncate()
-    logger.info(f"Updated status for user {user_id} to {status}")
-
-def ban_user(user_id: str, reason: str = "Banned by admin"):
-    """Ban a user from running the script."""
-    update_user_status(user_id, "banned")
-    logger.info(f"User {user_id} banned: {reason}")
-    print(f"{Fore.YELLOW}User {user_id} banned: {reason}{Style.RESET_ALL}")
-
-def revoke_user(user_id: str, reason: str = "Revoked by admin"):
-    """Revoke a user's approval, requiring re-approval."""
-    update_user_status(user_id, "revoked")
-    logger.info(f"User {user_id} revoked: {reason}")
-    print(f"{Fore.YELLOW}User {user_id} revoked: {reason}{Style.RESET_ALL}")
+def log_execution(user_id: str, duration: int):
+    content = get_gist_content(user_id)
+    if content:
+        data = json.loads(content)
+        exec_id = hashlib.sha256((str(uuid.uuid4()) + str(datetime.utcnow())).encode()).hexdigest()[:8]
+        data["execution_log"][exec_id] = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "ip": get_ip(),
+            "device_fingerprint": get_user_info()["device_fingerprint"],
+            "script_hash": hashlib.sha256(open(__file__, "rb").read()).hexdigest()[:64],
+            "duration": duration
+        }
+        create_or_update_gist(user_id, data)
+        logger.info(f"Execution logged for user {user_id[:10]} with ID {exec_id}")
 
 def validate_approval() -> bool:
-    """Require Telegram bot approval before running the script, with expiration check."""
-    init_users_file()
     user_id = get_user_id()
     print(f"{Fore.CYAN}Your user ID: {user_id}{Style.RESET_ALL}")
     logger.info(f"Validating approval for user {user_id}")
 
-    status = check_user_status(user_id)
+    status, data = check_license_status(user_id)
     if status == "banned":
         logger.error(f"Chaos-TELEGRAM: User {user_id} is banned")
         print(f"{Fore.RED}You are banned from using this script. Contact the owner.{Style.RESET_ALL}")
@@ -401,36 +384,34 @@ def validate_approval() -> bool:
         time.sleep(5)
         sys.exit(1)
     elif status == "approved":
-        # Load data to check expiration
-        with open(USERS_FILE, "r") as f:
-            data = json.load(f)
-            data.pop("integrity_hash", None)  # Remove hash for access
-            user_data = data.get(user_id, {})
-        approval_date_str = user_data.get("approval_date")
-        if approval_date_str:
-            approval_date = datetime.fromisoformat(approval_date_str)
-            if datetime.now() > approval_date + timedelta(days=LICENSE_VALIDITY_DAYS):
-                update_user_status(user_id, "revoked")
-                logger.warning(f"Chaos-TELEGRAM: Approval expired for user {user_id}")
-                print(f"{Fore.RED}Your approval has expired. Contact the owner for re-approval.{Style.RESET_ALL}")
-                time.sleep(5)
-                sys.exit(1)
+        if data.get("days_remaining", 0) <= 0:
+            update_user_status(user_id, "revoked", "License expired")
+            logger.warning(f"Chaos-TELEGRAM: License expired for user {user_id}")
+            print(f"{Fore.RED}Your license has expired. Contact the owner for re-approval.{Style.RESET_ALL}")
+            time.sleep(5)
+            sys.exit(1)
         logger.info(f"Chaos-TELEGRAM: User {user_id} approved")
         print(f"{Fore.GREEN}User approved. Proceeding with script execution.{Style.RESET_ALL}")
         return True
     else:  # pending or not exist
-        if status != "pending":
-            user_info = get_user_info()
-            send_approval_request(user_id, user_info)
-            update_user_status(user_id, "pending")
-        
-        # Wait for approval
+        user_info = get_user_info()
+        previous_ips = [log["ip"] for log in json.loads(get_gist_content(user_id) or "{}").get("execution_log", {}).values()] if get_gist_content(user_id) else []
+        if previous_ips and user_info["ip"] not in previous_ips and len(set(previous_ips)) > 1:
+            bot = Bot(TELEGRAM_TOKEN)
+            bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Chaos-SUSPICIOUS: Multiple IPs detected for {user_id[:10]}... Banned.")
+            update_user_status(user_id, "banned", "Multiple IP addresses detected")
+            print(f"{Fore.RED}Chaos-SUSPICIOUS: User banned due to suspicious activity. Contact the owner to appeal.{Style.RESET_ALL}"[:50])
+            sleep(5)
+            sys.exit(1)
+        send_approval_request(user_id, user_info)
+
         start_time = time.time()
         while time.time() - start_time < MAX_WAIT_TIME:
-            status = check_user_status(user_id)
+            status, data = check_license_status(user_id)
             if status == "approved":
                 logger.info(f"Chaos-TELEGRAM: Approval granted for user {user_id}")
                 print(f"{Fore.GREEN}Approval granted. Proceeding with script execution.{Style.RESET_ALL}")
+                display_license_info(user_id, data)
                 return True
             elif status in ["denied", "banned", "revoked"]:
                 logger.error(f"Chaos-TELEGRAM: Access {status} for user {user_id}")
@@ -439,11 +420,37 @@ def validate_approval() -> bool:
                 sys.exit(1)
             print(f"{Fore.CYAN}Waiting for admin approval...{Style.RESET_ALL}")
             time.sleep(CHECK_INTERVAL)
-        
+
         logger.error(f"Chaos-TELEGRAM: Approval timeout for user {user_id}")
         print(f"{Fore.RED}Approval timeout. Contact the owner.{Style.RESET_ALL}")
         time.sleep(5)
         sys.exit(1)
+
+def update_user_status(user_id: str, status: str, reason: str = "Admin action"):
+    content = get_gist_content(user_id)
+    if content:
+        data = json.loads(content)
+        data["status"] = status
+        data["last_updated"] = datetime.utcnow().isoformat() + "Z"
+        if status == "approved":
+            data["approval_date"] = datetime.utcnow().isoformat() + "Z"
+        elif status in ["banned", "revoked"]:
+            data["reason"] = reason
+        create_or_update_gist(user_id, data)
+        logger.info(f"Updated status for user {user_id} to {status} with reason: {reason}")
+
+def display_license_info(user_id: str, data: Dict):
+    print(f"\n{Fore.CYAN}                     License Information{Style.RESET_ALL}")
+    print(f"+{Fore.MAGENTA}---------------------------+---------------------{Style.RESET_ALL}+")
+    print(f"{Fore.MAGENTA}| User ID                   | {user_id[:10]}...       |{Style.RESET_ALL}")
+    print(f"{Fore.MAGENTA}| Status                    | {data.get('status', 'N/A')}            |{Style.RESET_ALL}")
+    print(f"{Fore.MAGENTA}| License Duration          | {data.get('license_duration', 30)} days             |{Style.RESET_ALL}")
+    print(f"{Fore.MAGENTA}| Days Remaining            | {data.get('days_remaining', 30)}                  |{Style.RESET_ALL}")
+    print(f"{Fore.MAGENTA}| IP Address                | {data['user_info']['ip']}       |{Style.RESET_ALL}")
+    print(f"{Fore.MAGENTA}| Hostname                  | {data['user_info']['hostname']} |{Style.RESET_ALL}")
+    print(f"{Fore.MAGENTA}| Username                  | {data['user_info']['username']} |{Style.RESET_ALL}")
+    print(f"{Fore.MAGENTA}| Last Updated              | {data.get('last_updated', 'N/A')} |{Style.RESET_ALL}")
+    print(f"+{Fore.MAGENTA}---------------------------+---------------------{Style.RESET_ALL}+")
 
 # Autograb Subjects
 def autograb_subjects() -> List[str]:
@@ -531,7 +538,6 @@ def load_links(links_file: str) -> List[str]:
             logger.error("Chaos-LINKS: No valid links in file")
             print(f"{Fore.RED}Chaos-LINKS: No valid links in {links_file}{Style.RESET_ALL}")
             sys.exit(1)
-        # Validate URLs
         url_regex = r'^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/.*)?$'
         valid_links = [link for link in links if re.match(url_regex, link)]
         if not valid_links:
@@ -599,7 +605,7 @@ def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
                 config["port"] = int(config["port"])
                 with smtplib.SMTP(config["server"], config["port"], timeout=10) as smtp:
                     smtp.starttls()
-                    smtp.login(config["username"], "password")
+                    smtp.login(config["username"], "password")  # Note: Use actual password here or handle securely
                     validated_configs.append(config)
             except Exception as e:
                 logger.error(f"Chaos-SMTP: Failed to validate {config.get('username', 'unknown')}: {str(e)}")
@@ -1143,13 +1149,13 @@ def main():
 
         # Handle ban/revoke commands
         if args.ban_user:
-            ban_user(args.ban_user, "Banned via command line")
+            update_user_status(args.ban_user, "banned", "Banned via command line")
             sys.exit(0)
         if args.revoke_user:
-            revoke_user(args.revoke_user, "Revoked via command line")
+            update_user_status(args.revoke_user, "revoked", "Revoked via command line")
             sys.exit(0)
 
-        # Validate approval via Telegram
+        # Validate approval via Telegram and Gist
         if not validate_approval():
             sys.exit(1)
 
