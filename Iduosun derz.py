@@ -64,8 +64,8 @@ except ImportError:
 # Configuration Constants
 HIDDEN_DIR_NAME = ".chaos-serpent"
 HIDDEN_SUBDIR_NAME = "cache"
-GITHUB_REPO = "Rydah300/Payscrapy"  # Your public GitHub repository
-LICENSE_FILE_PATH = "licenses.txt"  # Path to licenses.txt in repo
+GITHUB_REPO = "Rydah300/Smoako"
+LICENSE_FILE_PATH = "licenses.txt"
 GITHUB_LICENSE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{LICENSE_FILE_PATH}"
 CHECK_INTERVAL = 5
 MAX_WAIT_TIME = 300
@@ -147,7 +147,7 @@ SMS_SERPENT_FRAMES = [
     f"{Fore.CYAN}     ~~:---:~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~:---:~~{Style.RESET_ALL}"
 ]
 
-# License Manager Class
+# License Manager Class with Expiration and Days Remaining Display
 class LicenseManager:
     def __init__(self, github_license_url, local_license_file):
         self.github_license_url = github_license_url
@@ -204,13 +204,18 @@ class LicenseManager:
             return None, None
 
     def _fetch_approved_licenses(self):
-        """Fetch approved licenses from GitHub licenses.txt."""
+        """Fetch approved licenses with expiration dates from GitHub licenses.txt."""
         for attempt in range(self.max_retries):
             try:
                 response = requests.get(self.github_license_url, timeout=10)
                 response.raise_for_status()
-                licenses = response.text.splitlines()
-                return [lic.strip() for lic in licenses if lic.strip()]
+                licenses = {}
+                for line in response.text.splitlines():
+                    line = line.strip()
+                    if line and ":" in line:
+                        key, expiry = line.split(":", 1)
+                        licenses[key.strip()] = expiry.strip()
+                return licenses
             except requests.RequestException as e:
                 logger.warning(f"Chaos-LICENSE: Error fetching licenses (attempt {attempt + 1}/{self.max_retries}): {str(e)}")
                 if attempt < self.max_retries - 1:
@@ -219,6 +224,24 @@ class LicenseManager:
                     logger.error("Chaos-LICENSE: Failed to fetch licenses after retries")
                     return None
         return None
+
+    def _is_expired(self, expiry_date_str):
+        """Check if the license expiration date has passed."""
+        try:
+            expiry_date = datetime.strptime(expiry_date_str, "%Y-%m-%d").replace(tzinfo=pytz.UTC)
+            current_date = datetime.now(pytz.UTC)
+            return current_date > expiry_date, expiry_date
+        except ValueError as e:
+            logger.error(f"Chaos-LICENSE: Invalid expiration date format: {expiry_date_str}. Error: {str(e)}")
+            return True, None  # Treat invalid date as expired
+
+    def _calculate_days_remaining(self, expiry_date):
+        """Calculate days remaining until expiration."""
+        if expiry_date is None:
+            return "Invalid date"
+        current_date = datetime.now(pytz.UTC)
+        delta = expiry_date - current_date
+        return max(0, delta.days)
 
     def generate_license(self):
         """Generate and save a new license key if none exists."""
@@ -235,7 +258,7 @@ class LicenseManager:
                 sys.exit(1)
 
     def verify_license(self):
-        """Verify if the local license is approved in licenses.txt."""
+        """Verify if the local license is approved and not expired, then display license info."""
         license_key, stored_machine_id = self._load_local_license()
         if not license_key or stored_machine_id != self.machine_id:
             print(f"{Fore.CYAN}No valid local license found. Generating a new one...{Style.RESET_ALL}")
@@ -248,8 +271,24 @@ class LicenseManager:
             sys.exit(1)
 
         if license_key in approved_licenses:
-            logger.info(f"Chaos-LICENSE: License verified: {license_key}")
-            print(f"{Fore.GREEN}License verified successfully.{Style.RESET_ALL}")
+            expiry_date_str = approved_licenses[license_key]
+            is_expired, expiry_date = self._is_expired(expiry_date_str)
+            if is_expired:
+                logger.warning(f"Chaos-LICENSE: License expired: {license_key} (Expired on {expiry_date_str})")
+                print(f"{Fore.RED}Chaos-LICENSE: Your license has expired on {expiry_date_str}. Please contact the admin at john.doe@example.com for renewal.{Style.RESET_ALL}")
+                return False, license_key
+            days_remaining = self._calculate_days_remaining(expiry_date)
+            logger.info(f"Chaos-LICENSE: License verified: {license_key} (Expires on {expiry_date_str}, {days_remaining} days remaining)")
+            
+            # Display license information in a table
+            license_info = [
+                {"Field": f"{Fore.YELLOW}License Key{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}{license_key}{Style.RESET_ALL}"},
+                {"Field": f"{Fore.YELLOW}Expiration Date{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}{expiry_date_str}{Style.RESET_ALL}"},
+                {"Field": f"{Fore.YELLOW}Days Remaining{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}{days_remaining}{Style.RESET_ALL}"}
+            ]
+            print(f"\n{Fore.CYAN}License Information:{Style.RESET_ALL}")
+            print(tabulate(license_info, headers="keys", tablefmt="grid"))
+            
             return True, license_key
         else:
             logger.warning(f"Chaos-LICENSE: License not approved: {license_key}")
@@ -439,10 +478,10 @@ def validate_approval():
         is_valid, license_key = license_manager.verify_license()
         if is_valid:
             return True
-        print(f"{Fore.CYAN}Waiting for admin approval...{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}Waiting for admin approval or license renewal...{Style.RESET_ALL}")
         time.sleep(CHECK_INTERVAL)
-    logger.error("Chaos-LICENSE: Approval timeout")
-    print(f"{Fore.RED}Approval timeout. Contact the admin at john.doe@example.com.{Style.RESET_ALL}")
+    logger.error("Chaos-LICENSE: Approval or renewal timeout")
+    print(f"{Fore.RED}Approval or license renewal timeout. Contact the admin at john.doe@example.com.{Style.RESET_ALL}")
     sys.exit(1)
 
 # SMS-Related Functions
