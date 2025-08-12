@@ -3,11 +3,10 @@ import sys
 import platform
 import importlib.metadata
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 import shutil
 import json
-from itertools import cycle
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 import random
 import string
@@ -24,92 +23,64 @@ import hashlib
 import os
 import argparse
 import re
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from tqdm import tqdm
 import uuid
 import getpass
-try:
-    import winreg
-except ImportError:
-    winreg = None
+import requests
+import socket
+from pathlib import Path
+from colorama import init, Fore, Style
+import tempfile
+from itertools import cycle
 
+# Initialize colorama
+init()
+
+# Install missing modules
 try:
     from colorama import init, Fore, Style
     init()
 except ImportError:
     print("Installing colorama...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "colorama"])
-    from colorama import init, Fore, Style
-    init()
-
-try:
-    import wmi
-except ImportError:
-    wmi = None
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "colorama"])
+        from colorama import init, Fore, Style
+        init()
+    except subprocess.CalledProcessError as e:
+        print(f"{Fore.RED}Failed to install colorama: {str(e)}. Please install manually with 'pip install colorama' and rerun.{Style.RESET_ALL}")
+        sys.exit(1)
 
 try:
     import keyboard
 except ImportError:
     print("Installing keyboard...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "keyboard"])
-    import keyboard
-
-# Setup logging to file only (no console output)
-HIDDEN_DIR_NAME = ".chaos-serpent"
-HIDDEN_SUBDIR_NAME = "cache"
-LOG_FILE = None
-
-def setup_logging():
-    global LOG_FILE
     try:
-        system = platform.system()
-        if system == "Windows":
-            base_path = os.getenv("APPDATA", os.path.expanduser("~"))
-        elif system == "Linux":
-            base_path = os.path.expanduser("~/.cache")
-        elif system == "Darwin":
-            base_path = os.path.expanduser("~/Library/Caches")
-        else:
-            base_path = os.path.expanduser("~")
-        LOG_FILE = os.path.join(base_path, HIDDEN_DIR_NAME, "serpent.log")
-        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
-        logger = logging.getLogger(__name__)
-        logger.setLevel(logging.INFO)
-        file_handler = logging.FileHandler(LOG_FILE)
-        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
-        logger.addHandler(file_handler)
-        logger.addHandler(logging.NullHandler())
-        return logger
-    except Exception as e:
-        print(f"{Fore.RED}Chaos-LOG: Failed to set up logging: {str(e)}{Style.RESET_ALL}")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "keyboard"])
+        import keyboard
+    except subprocess.CalledProcessError as e:
+        print(f"{Fore.RED}Failed to install keyboard: {str(e)}. Please install manually with 'pip install keyboard' and rerun.{Style.RESET_ALL}")
         sys.exit(1)
 
-logger = setup_logging()
-
-# Required modules
-REQUIRED_MODULES = ["tabulate", "colorama", "cryptography", "tqdm", "keyboard", "pytz"]
-if platform.system() == "Windows":
-    REQUIRED_MODULES.append("wmi")
-
-def install_missing_modules():
-    missing_modules = []
-    for module in REQUIRED_MODULES:
-        try:
-            importlib.metadata.version(module)
-        except importlib.metadata.PackageNotFoundError:
-            missing_modules.append(module)
-    if missing_modules:
-        print(f"\n{Fore.CYAN}Installing missing modules: {', '.join(missing_modules)}{Style.RESET_ALL}")
-        for module in missing_modules:
-            try:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", module])
-                logger.info(f"Installed {module}")
-            except subprocess.CalledProcessError as e:
-                logger.error(f"Chaos-DEP: Failed to install {module}: {str(e)}")
-                print(f"{Fore.RED}Chaos-DEP: Failed to install {module}: {str(e)}{Style.RESET_ALL}")
-                sys.exit(1)
-
-install_missing_modules()
+# Configuration Constants
+HIDDEN_DIR_NAME = ".chaos-serpent"
+HIDDEN_SUBDIR_NAME = "cache"
+GITHUB_REPO = "Rydah300/Smoako"  # Your public GitHub repository
+LICENSE_FILE_PATH = "licenses.txt"  # Path to licenses.txt in repo
+GITHUB_LICENSE_URL = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{LICENSE_FILE_PATH}"
+CHECK_INTERVAL = 5
+MAX_WAIT_TIME = 300
+AUTOGRAB_LINKS_FILE = "autograb_links.json"
+SECRET_SALT = "HACKVERSE-DOMINION-2025"
+MAX_THREADS = 10
+CONTENT_SNIPPET_LENGTH = 30
+MAX_RETRIES = 3
+RETRY_BASE_DELAY = 2
+ANIMATION_FRAME_DELAY = 0.5
+CSV_FILE = "numbers.txt"
+LINKS_FILE = "links.txt"
+RATE_LIMIT_DELAY = 1
+SPAM_THRESHOLD_LOW = 0.3
+SPAM_THRESHOLD_HIGH = 0.6
 
 # Autograb Data
 AUTOGRAB_DATA = {
@@ -132,24 +103,6 @@ AUTOGRAB_DATA = {
 
 USA_TIMEZONES = ["US/Eastern", "US/Central", "US/Mountain", "US/Pacific"]
 
-# Configuration
-CHAOS_SEED = random.randint(1, 1000000)
-random.seed(CHAOS_SEED)
-CSV_FILE = "numbers.txt"
-LICENSE_FILE = "license.key"
-BLACKLIST_FILE = "SerpentTargent.dat"
-BLACKLIST_KEY_FILE = "blacklist_key.key"
-AUTOGRAB_LINKS_FILE = "autograb_links.json"
-LINKS_FILE = "links.txt"
-SECRET_SALT = "HACKVERSE-DOMINION-2025"
-LICENSE_VALIDITY_DAYS = 30
-MAX_THREADS = 10
-RATE_LIMIT_DELAY = 1
-CONTENT_SNIPPET_LENGTH = 30
-MAX_RETRIES = 3
-RETRY_BASE_DELAY = 2
-ANIMATION_FRAME_DELAY = 0.5
-
 # Spam Filtering Configuration
 SPAM_KEYWORDS = {
     "free": 0.8, "win": 0.7, "winner": 0.7, "urgent": 0.6, "prize": 0.7,
@@ -159,8 +112,6 @@ SPAM_KEYWORDS = {
     "pharmacy": 0.8, "credit card": 0.8, "earn money": 0.7, "make money": 0.7,
     "cash prize": 0.8, "free gift": 0.8, "exclusive deal": 0.6
 }
-SPAM_THRESHOLD_LOW = 0.3
-SPAM_THRESHOLD_HIGH = 0.6
 
 # Carrier Gateways
 CARRIER_GATEWAYS = {
@@ -196,10 +147,190 @@ SMS_SERPENT_FRAMES = [
     f"{Fore.CYAN}     ~~:---:~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~:---:~~{Style.RESET_ALL}"
 ]
 
-# Hidden Folder Setup
+# License Manager Class
+class LicenseManager:
+    def __init__(self, github_license_url, local_license_file):
+        self.github_license_url = github_license_url
+        self.local_license_file = local_license_file
+        self.machine_id = self._generate_machine_id()
+        self.max_retries = MAX_RETRIES
+        self.retry_delay = RETRY_BASE_DELAY
+
+    def _generate_machine_id(self):
+        """Generate a unique machine ID based on hardware and system info."""
+        try:
+            system_info = (
+                platform.node() +
+                platform.platform() +
+                str(platform.uname().processor) +
+                str(uuid.getnode())
+            )
+            return hashlib.sha256(system_info.encode()).hexdigest()[:16]
+        except Exception as e:
+            logger.error(f"Chaos-LICENSE: Error generating machine ID: {str(e)}")
+            return str(uuid.uuid4())[:16]
+
+    def _generate_license_key(self):
+        """Generate a unique license key combining machine ID and timestamp."""
+        timestamp = str(int(time.time()))
+        unique_string = f"{self.machine_id}{timestamp}{SECRET_SALT}"
+        return hashlib.sha256(unique_string.encode()).hexdigest()[:32]
+
+    def _save_local_license(self, license_key):
+        """Save the license key to a local file."""
+        try:
+            os.makedirs(os.path.dirname(self.local_license_file), exist_ok=True)
+            with open(self.local_license_file, "w") as f:
+                json.dump({"license_key": license_key, "machine_id": self.machine_id}, f)
+            logger.info(f"Chaos-LICENSE: License key saved locally: {license_key}")
+            print(f"{Fore.CYAN}Please send this license key to the admin for approval: {license_key}{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}Contact the admin via email: john.doe@example.com{Style.RESET_ALL}")
+            return True
+        except Exception as e:
+            logger.error(f"Chaos-LICENSE: Error saving license key: {str(e)}")
+            print(f"{Fore.RED}Chaos-LICENSE: Failed to save license key: {str(e)}{Style.RESET_ALL}")
+            return False
+
+    def _load_local_license(self):
+        """Load the license key from the local file."""
+        try:
+            if os.path.exists(self.local_license_file):
+                with open(self.local_license_file, "r") as f:
+                    data = json.load(f)
+                    return data.get("license_key"), data.get("machine_id")
+            return None, None
+        except Exception as e:
+            logger.error(f"Chaos-LICENSE: Error loading local license: {str(e)}")
+            return None, None
+
+    def _fetch_approved_licenses(self):
+        """Fetch approved licenses from GitHub licenses.txt."""
+        for attempt in range(self.max_retries):
+            try:
+                response = requests.get(self.github_license_url, timeout=10)
+                response.raise_for_status()
+                licenses = response.text.splitlines()
+                return [lic.strip() for lic in licenses if lic.strip()]
+            except requests.RequestException as e:
+                logger.warning(f"Chaos-LICENSE: Error fetching licenses (attempt {attempt + 1}/{self.max_retries}): {str(e)}")
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay * (2 ** attempt))
+                else:
+                    logger.error("Chaos-LICENSE: Failed to fetch licenses after retries")
+                    return None
+        return None
+
+    def generate_license(self):
+        """Generate and save a new license key if none exists."""
+        license_key, stored_machine_id = self._load_local_license()
+        if license_key and stored_machine_id == self.machine_id:
+            logger.info(f"Chaos-LICENSE: Existing license found: {license_key}")
+            return license_key
+        else:
+            license_key = self._generate_license_key()
+            if self._save_local_license(license_key):
+                return license_key
+            else:
+                print(f"{Fore.RED}Chaos-LICENSE: Failed to generate license key{Style.RESET_ALL}")
+                sys.exit(1)
+
+    def verify_license(self):
+        """Verify if the local license is approved in licenses.txt."""
+        license_key, stored_machine_id = self._load_local_license()
+        if not license_key or stored_machine_id != self.machine_id:
+            print(f"{Fore.CYAN}No valid local license found. Generating a new one...{Style.RESET_ALL}")
+            license_key = self.generate_license()
+            return False, license_key
+
+        approved_licenses = self._fetch_approved_licenses()
+        if approved_licenses is None:
+            print(f"{Fore.RED}Chaos-LICENSE: Cannot verify license due to network error. Please try again later.{Style.RESET_ALL}")
+            sys.exit(1)
+
+        if license_key in approved_licenses:
+            logger.info(f"Chaos-LICENSE: License verified: {license_key}")
+            print(f"{Fore.GREEN}License verified successfully.{Style.RESET_ALL}")
+            return True, license_key
+        else:
+            logger.warning(f"Chaos-LICENSE: License not approved: {license_key}")
+            print(f"{Fore.RED}License not approved. Please send this license key to the admin for approval: {license_key}{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}Contact the admin via email: john.doe@example.com{Style.RESET_ALL}")
+            return False, license_key
+
+# Utility Functions
+def is_rdp_session() -> bool:
+    """Detect if running in an RDP session."""
+    try:
+        if platform.system() == "Windows":
+            try:
+                import wmi
+                c = wmi.WMI()
+                for session in c.Win32_TerminalService():
+                    if hasattr(session, "ClientName") and session.ClientName:
+                        logger.info("Chaos-RDP: RDP session detected via WMI")
+                        return True
+            except (ImportError, AttributeError, Exception) as e:
+                logger.warning(f"Chaos-RDP: WMI detection failed: {str(e)}. Falling back to environment check")
+        env_checks = [
+            "SESSIONNAME" in os.environ and "rdp" in os.environ["SESSIONNAME"].lower(),
+            "RD_CLIENT" in os.environ,
+            "RDP-Tcp" in os.environ.get("SESSIONNAME", "")
+        ]
+        if any(env_checks):
+            logger.info("Chaos-RDP: RDP session detected via environment variables")
+            return True
+        logger.info("Chaos-RDP: Normal session assumed")
+        return False
+    except Exception as e:
+        logger.warning(f"Chaos-RDP: Unable to detect RDP session: {str(e)}. Assuming normal session")
+        return False
+
+def setup_logging():
+    """Set up logging with fallback for RDP and normal PC environments."""
+    global LOG_FILE
+    try:
+        system = platform.system()
+        is_rdp = is_rdp_session()
+        if system == "Windows":
+            base_path = os.getenv("APPDATA", os.path.expanduser("~"))
+        elif system == "Linux":
+            base_path = os.path.expanduser("~/.cache")
+        elif system == "Darwin":
+            base_path = os.path.expanduser("~/Library/Caches")
+        else:
+            base_path = os.path.expanduser("~")
+        
+        try:
+            temp_file = os.path.join(base_path, "test_write")
+            with open(temp_file, "w") as f:
+                f.write("test")
+            os.remove(temp_file)
+        except (PermissionError, OSError):
+            base_path = tempfile.gettempdir()
+            logger.info(f"Chaos-LOG: Falling back to temp directory {base_path} due to permission issues")
+        
+        LOG_FILE = os.path.join(base_path, HIDDEN_DIR_NAME, "serpent.log")
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        logger = logging.getLogger(__name__)
+        logger.setLevel(logging.INFO)
+        file_handler = logging.FileHandler(LOG_FILE)
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+        logger.addHandler(file_handler)
+        logger.addHandler(logging.NullHandler())
+        logger.info(f"Chaos-LOG: Logging initialized in {'RDP' if is_rdp else 'Normal'} environment")
+        return logger
+    except Exception as e:
+        print(f"{Fore.RED}Chaos-LOG: Failed to set up logging: {str(e)}. Using console logging.{Style.RESET_ALL}")
+        logger = logging.getLogger(__name__)
+        logger.setLevel(logging.INFO)
+        logger.addHandler(logging.StreamHandler())
+        return logger
+
 def get_hidden_folder_path() -> str:
+    """Get or create hidden folder path, with RDP compatibility."""
     system = platform.system()
     max_attempts = 3
+    is_rdp = is_rdp_session()
     for attempt in range(max_attempts):
         try:
             if system == "Windows":
@@ -214,25 +345,27 @@ def get_hidden_folder_path() -> str:
             else:
                 base_path = os.path.expanduser("~")
                 hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
+            
             os.makedirs(hidden_folder, exist_ok=True)
             test_file = os.path.join(hidden_folder, "test_write")
             with open(test_file, "w") as f:
                 f.write("test")
             os.remove(test_file)
+            
             if system == "Windows":
                 try:
                     import ctypes
-                    ctypes.windll.kernel32.SetFileAttributesW(hidden_folder, 0x2)  # Set hidden
+                    ctypes.windll.kernel32.SetFileAttributesW(hidden_folder, 0x2)
                     subprocess.check_call(['icacls', hidden_folder, '/inheritance:d'], creationflags=0x0800)
                     subprocess.check_call(['icacls', hidden_folder, '/grant:r', f'{getpass.getuser()}:F'], creationflags=0x0800)
                 except Exception as e:
                     logger.warning(f"Chaos-FILE: Failed to set Windows hidden attribute or permissions: {str(e)}")
             logger.info(f"Created/using hidden folder: {hidden_folder}")
             return hidden_folder
-        except Exception as e:
-            logger.warning(f"Chaos-FILE: Attempt {attempt + 1}/{max_attempts} failed to set up hidden folder: {str(e)}")
+        except PermissionError:
+            logger.warning(f"Chaos-FILE: Permission denied on attempt {attempt + 1}/{max_attempts}")
             if attempt == max_attempts - 1:
-                fallback_path = os.path.join(os.path.expanduser("~"), HIDDEN_DIR_NAME)
+                fallback_path = os.path.join(tempfile.gettempdir(), HIDDEN_DIR_NAME)
                 try:
                     os.makedirs(fallback_path, exist_ok=True)
                     test_file = os.path.join(fallback_path, "test_write")
@@ -243,337 +376,78 @@ def get_hidden_folder_path() -> str:
                     return fallback_path
                 except Exception as fallback_e:
                     logger.error(f"Chaos-FILE: Failed to set up fallback folder {fallback_path}: {str(fallback_e)}")
-                    print(f"{Fore.RED}Chaos-FILE: Failed to create hidden folder: {str(e)}. Fallback failed: {str(fallback_e)}{Style.RESET_ALL}")
+                    print(f"{Fore.RED}Chaos-FILE: No write permissions. Run with appropriate permissions.{Style.RESET_ALL}")
+                    sys.exit(1)
+            time.sleep(1)
+        except Exception as e:
+            logger.warning(f"Chaos-FILE: Attempt {attempt + 1}/{max_attempts} failed: {str(e)}")
+            if attempt == max_attempts - 1:
+                fallback_path = os.path.join(tempfile.gettempdir(), HIDDEN_DIR_NAME)
+                try:
+                    os.makedirs(fallback_path, exist_ok=True)
+                    test_file = os.path.join(fallback_path, "test_write")
+                    with open(test_file, "w") as f:
+                        f.write("test")
+                    os.remove(test_file)
+                    logger.info(f"Chaos-FILE: Using fallback folder: {fallback_path}")
+                    return fallback_path
+                except Exception as fallback_e:
+                    logger.error(f"Chaos-FILE: Failed to set up fallback folder {fallback_path}: {str(fallback_e)}")
+                    print(f"{Fore.RED}Chaos-FILE: Failed to create hidden folder: {str(fallback_e)}{Style.RESET_ALL}")
                     sys.exit(1)
             time.sleep(1)
 
+# Initialize Logger
+logger = setup_logging()
+
+# Required Modules
+REQUIRED_MODULES = ["tabulate", "colorama", "tqdm", "keyboard", "pytz", "requests"]
+if platform.system() == "Windows":
+    REQUIRED_MODULES.append("wmi")
+
+def install_missing_modules():
+    """Install missing modules, with RDP-specific handling."""
+    missing_modules = []
+    for module in REQUIRED_MODULES:
+        try:
+            importlib.metadata.version(module)
+        except importlib.metadata.PackageNotFoundError:
+            missing_modules.append(module)
+    if missing_modules:
+        print(f"\n{Fore.CYAN}Installing missing modules: {', '.join(missing_modules)}{Style.RESET_ALL}")
+        for module in missing_modules:
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", module])
+                logger.info(f"Installed {module}")
+            except subprocess.CalledProcessError as e:
+                print(f"{Fore.RED}Failed to install {module}: {str(e)}. Please install manually with 'pip install {module}' and rerun.{Style.RESET_ALL}")
+                sys.exit(1)
+
+install_missing_modules()
+
+# Define Hidden Folder and File Paths
 HIDDEN_FOLDER = get_hidden_folder_path()
-LICENSE_FILE_PATH = os.path.join(HIDDEN_FOLDER, LICENSE_FILE)
-BLACKLIST_FILE_PATH = os.path.join(HIDDEN_FOLDER, BLACKLIST_FILE)
-BLACKLIST_KEY_FILE_PATH = os.path.join(HIDDEN_FOLDER, BLACKLIST_KEY_FILE)
+LICENSE_FILE = os.path.join(HIDDEN_FOLDER, ".license")
 AUTOGRAB_LINKS_FILE_PATH = os.path.join(HIDDEN_FOLDER, AUTOGRAB_LINKS_FILE)
 
-# Encryption Functions
-def generate_encryption_key() -> bytes:
-    max_attempts = 3
-    for attempt in range(max_attempts):
-        try:
-            if os.path.exists(BLACKLIST_KEY_FILE_PATH):
-                with open(BLACKLIST_KEY_FILE_PATH, "rb") as f:
-                    key = f.read()
-                    if len(key) == 32:
-                        return key
-            key = os.urandom(32)
-            with open(BLACKLIST_KEY_FILE_PATH, "wb") as f:
-                f.write(key)
-            logger.info("Generated new encryption key")
-            return key
-        except Exception as e:
-            logger.warning(f"Chaos-ENC: Attempt {attempt + 1}/{max_attempts} failed to generate/load encryption key: {str(e)}")
-            if attempt == max_attempts - 1:
-                logger.error(f"Chaos-ENC: Failed to generate/load encryption key: {str(e)}")
-                print(f"{Fore.RED}Chaos-ENC: Failed to generate encryption key: {str(e)}{Style.RESET_ALL}")
-                sys.exit(1)
-            time.sleep(1)
+# License Validation
+def validate_approval():
+    """Validate license and wait for approval if needed."""
+    license_manager = LicenseManager(GITHUB_LICENSE_URL, LICENSE_FILE)
+    start_time = time.time()
+    while time.time() - start_time < MAX_WAIT_TIME:
+        is_valid, license_key = license_manager.verify_license()
+        if is_valid:
+            return True
+        print(f"{Fore.CYAN}Waiting for admin approval...{Style.RESET_ALL}")
+        time.sleep(CHECK_INTERVAL)
+    logger.error("Chaos-LICENSE: Approval timeout")
+    print(f"{Fore.RED}Approval timeout. Contact the admin at john.doe@example.com.{Style.RESET_ALL}")
+    sys.exit(1)
 
-def encrypt_data(data: Dict, key: bytes) -> bytes:
-    try:
-        aesgcm = AESGCM(key)
-        nonce = os.urandom(12)
-        json_data = json.dumps(data).encode('utf-8')
-        ciphertext = aesgcm.encrypt(nonce, json_data, None)
-        return nonce + ciphertext
-    except Exception as e:
-        logger.error(f"Chaos-ENC: Failed to encrypt data: {str(e)}")
-        print(f"{Fore.RED}Chaos-ENC: Failed to encrypt data: {str(e)}{Style.RESET_ALL}")
-        sys.exit(1)
-
-def decrypt_data(ciphertext: bytes, key: bytes) -> Dict:
-    try:
-        aesgcm = AESGCM(key)
-        nonce = ciphertext[:12]
-        json_data = aesgcm.decrypt(nonce, ciphertext[12:], None)
-        return json.loads(json_data.decode('utf-8'))
-    except Exception as e:
-        logger.error(f"Chaos-ENC: Failed to decrypt data: {str(e)}")
-        return {"blacklisted_ids": [], "blacklist_log": []}
-
-# Licensing and Blacklist Functions
-def get_hardware_id() -> str:
-    try:
-        system = platform.system()
-        if system == "Windows":
-            if wmi:
-                try:
-                    c = wmi.WMI()
-                    cpu_id = "".join([x.ProcessorId for x in c.Win32_Processor() if x.ProcessorId]) or "nocpu"
-                    mb_id = "".join([x.SerialNumber for x in c.Win32_BaseBoard() if x.SerialNumber]) or "nomb"
-                    disk_id = "".join([x.SerialNumber for x in c.Win32_DiskDrive() if x.SerialNumber]) or "nodisk"
-                    hardware_id = f"{cpu_id}-{mb_id}-{disk_id}"
-                    logger.info(f"Chaos-HWID: Using WMI-based ID: {hardware_id}")
-                    return hardware_id
-                except Exception as e:
-                    logger.warning(f"Chaos-HWID: WMI failed: {str(e)}")
-            if winreg:
-                try:
-                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\SystemInformation") as key:
-                        system_uuid = winreg.QueryValueEx(key, "ComputerSystemProductUUID")[0]
-                    hardware_id = f"reg-{system_uuid}"
-                    logger.info(f"Chaos-HWID: Using registry-based ID: {hardware_id}")
-                    return hardware_id
-                except Exception as e:
-                    logger.warning(f"Chaos-HWID: Registry failed: {str(e)}")
-            hardware_id = f"uuid-{str(uuid.getnode())}"
-            logger.info(f"Chaos-HWID: Using UUID fallback: {hardware_id}")
-            return hardware_id
-        elif system == "Linux":
-            try:
-                with open("/etc/machine-id", "r") as f:
-                    hardware_id = f.read().strip()
-                    logger.info(f"Chaos-HWID: Using Linux machine-id: {hardware_id}")
-                    return hardware_id
-                with open("/var/lib/dbus/machine-id", "r") as f:
-                    hardware_id = f.read().strip()
-                    logger.info(f"Chaos-HWID: Using Linux dbus machine-id: {hardware_id}")
-                    return hardware_id
-            except Exception as e:
-                logger.warning(f"Chaos-HWID: Linux machine-id failed: {str(e)}")
-                hardware_id = f"uuid-{str(uuid.getnode())}"
-                logger.info(f"Chaos-HWID: Using UUID fallback: {hardware_id}")
-                return hardware_id
-        elif system == "Darwin":
-            try:
-                hardware_id = platform.node() + platform.mac_ver()[0]
-                logger.info(f"Chaos-HWID: Using macOS node-based ID: {hardware_id}")
-                return hardware_id
-            except Exception as e:
-                logger.warning(f"Chaos-HWID: macOS node failed: {str(e)}")
-                hardware_id = f"uuid-{str(uuid.getnode())}"
-                logger.info(f"Chaos-HWID: Using UUID fallback: {hardware_id}")
-                return hardware_id
-        else:
-            logger.warning("Chaos-HWID: Unsupported platform, using UUID fallback")
-            hardware_id = f"uuid-{str(uuid.getnode())}"
-            logger.info(f"Chaos-HWID: Using UUID fallback: {hardware_id}")
-            return hardware_id
-    except Exception as e:
-        logger.error(f"Chaos-HWID: Failed to get hardware ID: {str(e)}")
-        hardware_id = f"uuid-{str(uuid.getnode())}"
-        logger.info(f"Chaos-HWID: Using UUID fallback: {hardware_id}")
-        return hardware_id
-
-def generate_license_key(hardware_id: str) -> str:
-    return hashlib.sha256((hardware_id + SECRET_SALT).encode()).hexdigest()
-
-def save_license_key(license_key: str, issuance_date: str, hardware_id: str):
-    global LICENSE_FILE_PATH
-    max_attempts = 3
-    for attempt in range(max_attempts):
-        try:
-            hidden_folder = os.path.dirname(LICENSE_FILE_PATH)
-            os.makedirs(hidden_folder, exist_ok=True)
-            test_file = os.path.join(hidden_folder, "test_write")
-            with open(test_file, "w") as f:
-                f.write("test")
-            os.remove(test_file)
-            logger.info(f"Chaos-LIC: Verified folder is writable: {hidden_folder}")
-            license_data = {
-                "license_key": license_key,
-                "issuance_date": issuance_date,
-                "hardware_id": hardware_id
-            }
-            with open(LICENSE_FILE_PATH, "w") as f:
-                json.dump(license_data, f, indent=2)
-            if os.path.exists(LICENSE_FILE_PATH):
-                with open(LICENSE_FILE_PATH, "r") as f:
-                    saved_data = json.load(f)
-                if saved_data == license_data:
-                    logger.info(f"Chaos-LIC: License key saved to {LICENSE_FILE_PATH} (valid for {LICENSE_VALIDITY_DAYS} days, hardware_id: {hardware_id})")
-                    print(f"{Fore.GREEN}Chaos-LIC: License key saved successfully{Style.RESET_ALL}")
-                    return
-                else:
-                    logger.warning(f"Chaos-LIC: License file corrupted during write: {LICENSE_FILE_PATH}")
-            else:
-                logger.warning(f"Chaos-LIC: License file not created: {LICENSE_FILE_PATH}")
-        except Exception as e:
-            logger.warning(f"Chaos-LIC: Attempt {attempt + 1}/{max_attempts} failed to save license key to {LICENSE_FILE_PATH}: {str(e)}")
-            if attempt == max_attempts - 1:
-                fallback_path = os.path.join(os.path.expanduser("~"), HIDDEN_DIR_NAME, LICENSE_FILE)
-                try:
-                    os.makedirs(os.path.dirname(fallback_path), exist_ok=True)
-                    with open(fallback_path, "w") as f:
-                        json.dump(license_data, f, indent=2)
-                    if os.path.exists(fallback_path):
-                        logger.info(f"Chaos-LIC: License key saved to fallback {fallback_path}")
-                        print(f"{Fore.YELLOW}Chaos-LIC: License key saved to fallback location{Style.RESET_ALL}")
-                        LICENSE_FILE_PATH = fallback_path
-                        return
-                    else:
-                        logger.error(f"Chaos-LIC: Failed to save license key to fallback {fallback_path}")
-                except Exception as fallback_e:
-                    logger.error(f"Chaos-LIC: Failed to save license key: {str(e)}. Fallback failed: {str(fallback_e)}")
-                    print(f"{Fore.RED}Chaos-LIC: Failed to save license key: {str(e)}. Fallback failed: {str(fallback_e)}{Style.RESET_ALL}")
-                    sys.exit(1)
-            time.sleep(1)
-
-def load_license_key() -> Optional[Dict[str, str]]:
-    try:
-        if os.path.exists(LICENSE_FILE_PATH):
-            with open(LICENSE_FILE_PATH, "r") as f:
-                data = json.load(f)
-                logger.info(f"Chaos-LIC: Loaded license key from {LICENSE_FILE_PATH}")
-                return data
-        logger.info(f"Chaos-LIC: No license file found at {LICENSE_FILE_PATH}")
-        return None
-    except Exception as e:
-        logger.error(f"Chaos-LIC: Failed to load license key from {LICENSE_FILE_PATH}: {str(e)}")
-        return None
-
-def create_blacklist_file(hardware_id: str, reason: str = "License expired"):
-    max_attempts = 3
-    for attempt in range(max_attempts):
-        try:
-            key = generate_encryption_key()
-            blacklist_data = {
-                "blacklisted_ids": [hardware_id],
-                "blacklist_log": [{
-                    "hardware_id": hardware_id,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "reason": reason
-                }]
-            }
-            os.makedirs(os.path.dirname(BLACKLIST_FILE_PATH), exist_ok=True)
-            with open(BLACKLIST_FILE_PATH, "wb") as f:
-                f.write(encrypt_data(blacklist_data, key))
-            logger.info(f"Chaos-BLACKLIST: Created blacklist file with {hardware_id}: {reason}")
-            return
-        except Exception as e:
-            logger.warning(f"Chaos-BLACKLIST: Attempt {attempt + 1}/{max_attempts} failed to create blacklist file: {str(e)}")
-            if attempt == max_attempts - 1:
-                logger.error(f"Chaos-BLACKLIST: Failed to create blacklist file: {str(e)}")
-                print(f"{Fore.RED}Chaos-BLACKLIST: Failed to create blacklist file: {str(e)}{Style.RESET_ALL}")
-                sys.exit(1)
-            time.sleep(1)
-
-def add_to_blacklist(hardware_id: str, reason: str = "License expired"):
-    try:
-        key = generate_encryption_key()
-        blacklist_data = {"blacklisted_ids": [], "blacklist_log": []}
-        if os.path.exists(BLACKLIST_FILE_PATH):
-            with open(BLACKLIST_FILE_PATH, "rb") as f:
-                ciphertext = f.read()
-            blacklist_data = decrypt_data(ciphertext, key)
-        if hardware_id not in blacklist_data["blacklisted_ids"]:
-            blacklist_data["blacklisted_ids"].append(hardware_id)
-            blacklist_data["blacklist_log"].append({
-                "hardware_id": hardware_id,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "reason": reason
-            })
-            ciphertext = encrypt_data(blacklist_data, key)
-            with open(BLACKLIST_FILE_PATH, "wb") as f:
-                f.write(ciphertext)
-            logger.info(f"Chaos-BLACKLIST: Blacklisted {hardware_id}: {reason}")
-    except Exception as e:
-        logger.error(f"Chaos-BLACKLIST: Failed to blacklist: {str(e)}")
-        print(f"{Fore.RED}Chaos-BLACKLIST: Failed to blacklist: {str(e)}{Style.RESET_ALL}")
-        sys.exit(1)
-
-def check_blacklist(hardware_id: str) -> bool:
-    try:
-        if os.path.exists(BLACKLIST_FILE_PATH):
-            key = generate_encryption_key()
-            with open(BLACKLIST_FILE_PATH, "rb") as f:
-                ciphertext = f.read()
-            blacklist_data = decrypt_data(ciphertext, key)
-            if hardware_id in blacklist_data.get("blacklisted_ids", []):
-                print(f"\n{Fore.RED}LICENSE HAS BEEN REVOKED OR INVALID KINDLY CONTACT TOOLS OWNER THANK U!!!{Style.RESET_ALL}")
-                logger.error("Chaos-LIC: PC blacklisted")
-                time.sleep(5)
-                sys.exit(1)
-        return False
-    except Exception as e:
-        logger.error(f"Chaos-BLACKLIST: Failed to check blacklist: {str(e)}")
-        return False
-
-def validate_license() -> Tuple[bool, Optional[str], Optional[str], Optional[int]]:
-    license_data = load_license_key()
-    current_date = datetime.now()
-    
-    if license_data and "hardware_id" in license_data:
-        hardware_id = license_data["hardware_id"]
-        logger.info(f"Chaos-LIC: Using stored hardware_id: {hardware_id}")
-    else:
-        hardware_id = get_hardware_id()
-        logger.info(f"Chaos-LIC: Generated new hardware_id: {hardware_id}")
-    
-    if check_blacklist(hardware_id):
-        return False, None, None, None
-    
-    expected_key = generate_license_key(hardware_id)
-    
-    if license_data is None:
-        issuance_date = current_date.strftime("%Y-%m-%d %H:%M:%S")
-        logger.info("Chaos-LIC: Generating new license")
-        save_license_key(expected_key, issuance_date, hardware_id)
-        expiration_date = current_date + timedelta(days=LICENSE_VALIDITY_DAYS)
-        print(f"\n{Fore.LIGHTBLUE_EX}New license generated (expires {expiration_date}){Style.RESET_ALL}")
-        return True, expected_key, expiration_date.strftime("%Y-%m-%d %H:%M:%S"), LICENSE_VALIDITY_DAYS
-    
-    stored_key = license_data.get("license_key")
-    issuance_date_str = license_data.get("issuance_date")
-    try:
-        issuance_date = datetime.strptime(issuance_date_str, "%Y-%m-%d %H:%M:%S")
-        expiration_date = issuance_date + timedelta(days=LICENSE_VALIDITY_DAYS)
-        days_remaining = (expiration_date - current_date).days
-        if current_date > expiration_date:
-            logger.error(f"Chaos-LIC: License expired on {expiration_date}")
-            create_blacklist_file(hardware_id)
-            if os.path.exists(LICENSE_FILE_PATH):
-                os.remove(LICENSE_FILE_PATH)
-            print(f"\n{Fore.RED}LICENSE HAS BEEN REVOKED OR INVALID KINDLY CONTACT TOOLS OWNER THANK U!!!{Style.RESET_ALL}")
-            time.sleep(5)
-            return False, None, None, None
-        if stored_key != expected_key:
-            logger.error(f"Chaos-LIC: Invalid license key (expected: {expected_key[:10]}..., got: {stored_key[:10]}...)")
-            print(f"\n{Fore.RED}LICENSE HAS BEEN REVOKED OR INVALID KINDLY CONTACT TOOLS OWNER THANK U!!!{Style.RESET_ALL}")
-            time.sleep(5)
-            return False, None, None, None
-        logger.info(f"Chaos-LIC: License valid (expires {expiration_date})")
-        print(f"\n{Fore.LIGHTBLUE_EX}License valid (expires {expiration_date}, {days_remaining} days remaining){Style.RESET_ALL}")
-        return True, stored_key, expiration_date.strftime("%Y-%m-%d %H:%M:%S"), days_remaining
-    except Exception as e:
-        logger.error(f"Chaos-LIC: Invalid license format: {str(e)}")
-        print(f"\n{Fore.RED}LICENSE HAS BEEN REVOKED OR INVALID KINDLY CONTACT TOOLS OWNER THANK U!!!{Style.RESET_ALL}")
-        time.sleep(5)
-        return False, None, None, None
-
-def revoke_license():
-    if not os.path.exists(LICENSE_FILE_PATH):
-        print(f"\n{Fore.YELLOW}No license to revoke{Style.RESET_ALL}")
-        logger.info("Chaos-LIC: No license to revoke")
-        sys.exit(0)
-    print("\nWARNING: Revoking license will disable the script")
-    if input("Confirm revoke (y/n): ").strip().lower() in ['y', 'yes']:
-        try:
-            license_data = load_license_key()
-            hardware_id = license_data.get("hardware_id", get_hardware_id())
-            add_to_blacklist(hardware_id, "License revoked")
-            os.remove(LICENSE_FILE_PATH)
-            print(f"\n{Fore.YELLOW}License revoked{Style.RESET_ALL}")
-            logger.info("Chaos-LIC: License revoked")
-            sys.exit(0)
-        except Exception as e:
-            logger.error(f"Chaos-LIC: Failed to revoke: {str(e)}")
-            print(f"\n{Fore.RED}Failed to revoke license: {str(e)}{Style.RESET_ALL}")
-            sys.exit(1)
-    else:
-        print(f"\n{Fore.YELLOW}Revocation cancelled{Style.RESET_ALL}")
-        logger.info("Chaos-LIC: Revocation cancelled")
-        sys.exit(0)
-
-# Autograb Subjects
+# SMS-Related Functions
 def autograb_subjects() -> List[str]:
+    """Return a list of autograb subjects."""
     return [
         "Update",
         "News",
@@ -585,26 +459,8 @@ def autograb_subjects() -> List[str]:
         "Latest News"
     ]
 
-def display_owner_info():
-    table = tabulate(OWNER_INFO, headers="keys", tablefmt="grid")
-    terminal_width = shutil.get_terminal_size().columns
-    table_lines = table.split('\n')
-    table_width = max(len(line.replace(Fore.YELLOW, '').replace(Style.RESET_ALL, '')) for line in table_lines)
-    padding = (terminal_width - table_width) // 2 if terminal_width > table_width else 0
-    header = f"Owner Information:"
-    print(f"\n{Fore.CYAN}{' ' * ((terminal_width - len(header)) // 2)}{header}{Style.RESET_ALL}")
-    for line in table_lines:
-        print(' ' * padding + line)
-
-def display_instructions():
-    if os.getenv("STARTUP_MODE") == "non_interactive":
-        return
-    instructions = "Press SPACEBAR to pause/resume sending"
-    terminal_width = shutil.get_terminal_size().columns
-    padding = (terminal_width - len(instructions)) // 2 if terminal_width > len(instructions) else 0
-    print(f"\n{Fore.RED}{' ' * padding}{instructions}{Style.RESET_ALL}")
-
 def display_autograb_codes():
+    """Display available autograb codes."""
     autograb_codes = list(AUTOGRAB_DATA.keys()) + ["TIME", "DATE", "LINK", "LINKS", "VICTIM NUM"]
     table_data = []
     for i in range(0, len(autograb_codes), 2):
@@ -620,6 +476,7 @@ def display_autograb_codes():
     print(tabulate(table_data, headers="keys", tablefmt="grid"))
 
 def save_autograb_links(links: List[str]):
+    """Save autograb links to a file."""
     max_attempts = 3
     for attempt in range(max_attempts):
         try:
@@ -636,6 +493,7 @@ def save_autograb_links(links: List[str]):
             time.sleep(1)
 
 def load_autograb_links() -> List[str]:
+    """Load autograb links from a file."""
     try:
         if os.path.exists(AUTOGRAB_LINKS_FILE_PATH):
             with open(AUTOGRAB_LINKS_FILE_PATH, "r") as f:
@@ -647,6 +505,7 @@ def load_autograb_links() -> List[str]:
         return []
 
 def load_links(links_file: str) -> List[str]:
+    """Load and validate URLs from a links file."""
     try:
         if not os.path.exists(links_file):
             logger.error(f"Chaos-FILE: Links file not found: {links_file}")
@@ -658,7 +517,6 @@ def load_links(links_file: str) -> List[str]:
             logger.error("Chaos-LINKS: No valid links in file")
             print(f"{Fore.RED}Chaos-LINKS: No valid links in {links_file}{Style.RESET_ALL}")
             sys.exit(1)
-        # Validate URLs
         url_regex = r'^https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/.*)?$'
         valid_links = [link for link in links if re.match(url_regex, link)]
         if not valid_links:
@@ -673,6 +531,7 @@ def load_links(links_file: str) -> List[str]:
         sys.exit(1)
 
 def analyze_spam_content(message: str) -> float:
+    """Analyze message for spam content."""
     score = 0.0
     message_lower = message.lower()
     for keyword, weight in SPAM_KEYWORDS.items():
@@ -681,6 +540,7 @@ def analyze_spam_content(message: str) -> float:
     return min(score, 1.0)
 
 def check_spam_content(messages: List[str]) -> List[Dict[str, any]]:
+    """Check spam scores for a list of messages."""
     return [
         {
             "message": msg,
@@ -690,6 +550,7 @@ def check_spam_content(messages: List[str]) -> List[Dict[str, any]]:
     ]
 
 def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
+    """Load and validate SMTP configurations."""
     try:
         if not os.path.exists(smtp_file):
             logger.error(f"Chaos-FILE: File not found: {smtp_file}")
@@ -724,10 +585,7 @@ def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
                 continue
             try:
                 config["port"] = int(config["port"])
-                with smtplib.SMTP(config["server"], config["port"], timeout=10) as smtp:
-                    smtp.starttls()
-                    smtp.login(config["username"], "password")
-                    validated_configs.append(config)
+                validated_configs.append(config)
             except Exception as e:
                 logger.error(f"Chaos-SMTP: Failed to validate {config.get('username', 'unknown')}: {str(e)}")
         if not validated_configs:
@@ -742,6 +600,7 @@ def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
         sys.exit(1)
 
 def load_messages(message_file: str) -> List[str]:
+    """Load messages from a file."""
     try:
         if not os.path.exists(message_file):
             logger.error(f"Chaos-FILE: File not found: {message_file}")
@@ -765,25 +624,31 @@ def load_messages(message_file: str) -> List[str]:
         sys.exit(1)
 
 def get_message(messages: List[str], rotate_messages: bool, selected_message: Optional[str] = None) -> str:
+    """Get a message, either rotating or selected."""
     if not rotate_messages and selected_message:
         return selected_message
     return random.choice(messages)
 
 def get_subject(subjects: List[str], rotate_subjects: bool, selected_subject: Optional[str] = None) -> str:
+    """Get a subject, either rotating or selected."""
     if not rotate_subjects and selected_subject:
         return selected_subject
     return random.choice(subjects)
 
 def chaos_string(length: int = 10) -> str:
+    """Generate a random string."""
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
 
 def chaos_delay(base_delay: float = RATE_LIMIT_DELAY) -> float:
+    """Generate a random delay."""
     return base_delay + random.uniform(0, 0.5)
 
 def retry_delay(attempt: int, base_delay: float = RETRY_BASE_DELAY) -> float:
+    """Calculate retry delay with exponential backoff."""
     return base_delay * (2 ** attempt) + random.uniform(0, 0.5)
 
 def load_numbers(txt_file: str) -> List[Dict[str, str]]:
+    """Load and validate phone numbers from a CSV file."""
     try:
         if not os.path.exists(txt_file):
             logger.error(f"Chaos-FILE: File not found: {txt_file}")
@@ -819,7 +684,8 @@ def load_numbers(txt_file: str) -> List[Dict[str, str]]:
         print(f"{Fore.RED}Chaos-NUM: Failed to load numbers: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
-def get_configs_mode1() -> tuple[List[Dict[str, str]], str, List[str], bool, Optional[str]]:
+def get_configs_mode1() -> Tuple[List[Dict[str, str]], str, List[str], bool, Optional[str]]:
+    """Configure settings for MODERN SENDER MODE."""
     if os.getenv("STARTUP_MODE") == "non_interactive":
         smtp_file = "smtp_configs.txt"
         message_file = "messages.txt"
@@ -871,7 +737,8 @@ def get_configs_mode1() -> tuple[List[Dict[str, str]], str, List[str], bool, Opt
         config["message_file"] = message_file
     return smtp_configs, message_file, subjects, rotate_subjects, selected_subject
 
-def get_configs_mode2() -> tuple[List[Dict[str, str]], str, List[str], bool, Optional[str], List[str], bool, Optional[str]]:
+def get_configs_mode2() -> Tuple[List[Dict[str, str]], str, List[str], bool, Optional[str], List[str], bool, Optional[str]]:
+    """Configure settings for SERPENT AI MODE."""
     if os.getenv("STARTUP_MODE") == "non_interactive":
         smtp_file = "smtp_configs.txt"
         message = "Transaction at [BANK+NAME] for [AMOUNT]. Details: [LINKS]"
@@ -942,7 +809,8 @@ def configure_smtp_and_messages(
     subjects: List[str],
     rotate_subjects: bool,
     selected_subject: Optional[str]
-) -> tuple[Optional[Dict[str, str]], bool, Optional[str], bool, List[str], bool, Optional[str]]:
+) -> Tuple[Optional[Dict[str, str]], bool, Optional[str], bool, List[str], bool, Optional[str]]:
+    """Configure SMTP and message settings."""
     rotate_smtp = False
     selected_smtp = None
     rotate_messages = False
@@ -1008,6 +876,7 @@ def configure_smtp_and_messages(
     return selected_smtp, rotate_smtp, selected_message, rotate_messages, subjects, rotate_subjects, selected_subject
 
 def process_autograb_codes(message: str, link: Optional[str] = None, links: Optional[List[str]] = None, recipient_email: Optional[str] = None) -> str:
+    """Process autograb codes in a message."""
     autograb_iterators = {key: cycle(values) for key, values in AUTOGRAB_DATA.items()}
     links_iterator = cycle(links) if links else None
     def replace_code(match):
@@ -1048,7 +917,8 @@ def send_sms(
     link: Optional[str] = None,
     links: Optional[List[str]] = None,
     max_retries: int = MAX_RETRIES
-) -> tuple[bool, str, str, str, float]:
+) -> Tuple[bool, str, str, str, float]:
+    """Send an SMS via email-to-SMS gateway."""
     message = process_autograb_codes(message, link, links, recipient_email)
     if len(message) > 160:
         message = message[:157] + "..."
@@ -1079,6 +949,7 @@ pause_event = threading.Event()
 pause_event.set()
 
 def keyboard_listener():
+    """Listen for SPACEBAR to pause/resume execution."""
     if os.getenv("STARTUP_MODE") == "non_interactive":
         return
     try:
@@ -1090,7 +961,7 @@ def keyboard_listener():
                 pause_event.clear()
                 terminal_width = shutil.get_terminal_size().columns
                 pause_message = "Paused. Press SPACEBAR to resume."
-                padding = (terminal_width - len(pause_message)) // 2
+                padding = (terminal_width - len(pause_message) // 2)
                 print(f"\r{Fore.YELLOW}{' ' * padding}{pause_message}{Style.RESET_ALL}", flush=True)
             else:
                 pause_event.set()
@@ -1115,6 +986,7 @@ def worker(
     rotate_links: bool = False,
     selected_link: Optional[str] = None
 ):
+    """Worker thread for sending SMS."""
     chaos_id = chaos_string(5)
     smtp_iterator = cycle(smtp_configs) if rotate_smtp else None
     link_iterator = cycle(links) if rotate_links and links else None
@@ -1165,6 +1037,7 @@ def send_bulk_sms(
     rotate_links: bool = False,
     selected_link: Optional[str] = None
 ) -> List[Dict[str, str]]:
+    """Send bulk SMS messages."""
     global paused
     if mode == "mode1":
         messages = load_messages(message_file)
@@ -1233,6 +1106,7 @@ def send_bulk_sms(
     return results
 
 def select_mode() -> str:
+    """Select operation mode (MODERN SENDER or SERPENT AI)."""
     if os.getenv("STARTUP_MODE") == "non_interactive":
         logger.info("Selected SERPENT AI MODE (non-interactive)")
         return "mode2"
@@ -1247,7 +1121,85 @@ def select_mode() -> str:
             return f"mode{choice}"
         print("Invalid choice. Enter 1 or 2.")
 
+# Utility Functions
+def get_user_info() -> Dict[str, str]:
+    """Get user information for logging."""
+    return {
+        "ip": get_ip(),
+        "hostname": socket.gethostname(),
+        "timestamp": datetime.now(pytz.timezone("UTC")).isoformat(),
+        "username": getpass.getuser() or os.environ.get("USERNAME", "unknown"),
+        "device_fingerprint": hashlib.sha256((socket.gethostname() + get_ip() + platform.node()).encode()).hexdigest(),
+        "environment": "RDP" if is_rdp_session() else "Normal"
+    }
+
+def get_ip() -> str:
+    """Get IP address, with fallback for RDP environments."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except socket.gaierror:
+        try:
+            response = requests.get("https://api.ipify.org", timeout=5)
+            response.raise_for_status()
+            return response.text
+        except requests.RequestException:
+            logger.warning("Chaos-IP: Failed to retrieve IP, defaulting to localhost")
+            return "127.0.0.1"
+
+def log_execution(duration: int):
+    """Log script execution details."""
+    try:
+        user_info = get_user_info()
+        exec_id = hashlib.sha256((str(uuid.uuid4()) + str(datetime.now(pytz.timezone("UTC")))).encode()).hexdigest()[:8]
+        log_data = {
+            "exec_id": exec_id,
+            "timestamp": datetime.now(pytz.timezone("UTC")).isoformat(),
+            "ip": user_info["ip"],
+            "device_fingerprint": user_info["device_fingerprint"],
+            "script_hash": hashlib.sha256(open(__file__, "rb").read()).hexdigest()[:64],
+            "duration": duration,
+            "environment": user_info["environment"]
+        }
+        log_file = os.path.join(HIDDEN_FOLDER, "execution_log.json")
+        try:
+            with open(log_file, "r") as f:
+                existing_logs = json.load(f)
+        except:
+            existing_logs = []
+        existing_logs.append(log_data)
+        with open(log_file, "w") as f:
+            json.dump(existing_logs, f, indent=2)
+        logger.info(f"Chaos-LOG: Execution logged with ID {exec_id}")
+    except Exception as e:
+        logger.error(f"Chaos-LOG: Failed to log execution: {str(e)}")
+
+def display_owner_info():
+    """Display owner information in a table."""
+    table = tabulate(OWNER_INFO, headers="keys", tablefmt="grid")
+    terminal_width = shutil.get_terminal_size().columns
+    table_lines = table.split('\n')
+    table_width = max(len(line.replace(Fore.YELLOW, '').replace(Style.RESET_ALL, '')) for line in table_lines)
+    padding = (terminal_width - table_width) // 2 if terminal_width > table_width else 0
+    header = f"Owner Information:"
+    print(f"\n{Fore.CYAN}{' ' * ((terminal_width - len(header)) // 2)}{header}{Style.RESET_ALL}")
+    for line in table_lines:
+        print(' ' * padding + line)
+
+def display_instructions():
+    """Display script instructions."""
+    if os.getenv("STARTUP_MODE") == "non_interactive":
+        return
+    instructions = "Press SPACEBAR to pause/resume sending"
+    terminal_width = shutil.get_terminal_size().columns
+    padding = (terminal_width - len(instructions)) // 2 if terminal_width > len(instructions) else 0
+    print(f"\n{Fore.RED}{' ' * padding}{instructions}{Style.RESET_ALL}")
+
 def animate_logo():
+    """Display the ASCII logo."""
     if os.getenv("STARTUP_MODE") == "non_interactive":
         return
     print("\033[H\033[J", end="")
@@ -1257,18 +1209,26 @@ def main():
     try:
         animate_logo()
         display_owner_info()
-        display_instructions()
-        parser = argparse.ArgumentParser(description="SMS SERPENT - Chaos Bulk SMS")
-        parser.add_argument("--revoke-license", action="store_true", help="Revoke license")
+        parser = argparse.ArgumentParser(description="SMS Serpent - License-Protected Bulk SMS")
+        parser.add_argument("--ban-user", type=str, help="Ban a user by license key")
         parser.add_argument("--non-interactive", action="store_true", help="Run in non-interactive mode for startup")
         args = parser.parse_args()
+        
         if args.non_interactive:
             os.environ["STARTUP_MODE"] = "non_interactive"
+        
+        if args.ban_user:
+            print(f"{Fore.RED}Ban operation requires admin access. Please remove the license key manually from {GITHUB_LICENSE_URL}.{Style.RESET_ALL}")
+            sys.exit(0)
+        
+        # Verify license before showing SMS functionality
+        if not validate_approval():
+            sys.exit(1)
+        
+        # Display instructions and SMS functionality only after license approval
+        display_instructions()
         chaos_id = chaos_string(5)
         current_time = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d %I:%M %p")
-        is_valid, license_key, expiration_date, days_remaining = validate_license()
-        if not is_valid:
-            sys.exit(1)
         startup_message = "SMS SERPENT RUNNING"
         terminal_width = shutil.get_terminal_size().columns
         message_length = len(startup_message)
@@ -1279,25 +1239,19 @@ def main():
         print(f"{' ' * padding}{Fore.YELLOW}{Style.BRIGHT}| {' ' * (box_width - message_length - 4)}{startup_message}{' ' * (box_width - message_length - 4)} |{Style.RESET_ALL}")
         print(f"{' ' * padding}{Fore.YELLOW}{Style.BRIGHT}{horizontal_border}{Style.RESET_ALL}")
         logger.info(f"~~~~~~\nStarting SMS SERPENT\n{current_time}\n~~~~~~")
-        if args.revoke_license:
-            revoke_license()
-            return
-        if os.getenv("STARTUP_MODE") != "non_interactive":
-            print(f"\n{Fore.LIGHTBLUE_EX}License Information:{Style.RESET_ALL}")
-            print(f"{Fore.LIGHTBLUE_EX}License Key: {license_key}{Style.RESET_ALL}")
-            print(f"{Fore.LIGHTBLUE_EX}Expiration Date: {expiration_date}{Style.RESET_ALL}")
-            print(f"{Fore.LIGHTBLUE_EX}Days Remaining: {days_remaining}{Style.RESET_ALL}")
-
+        
         if not os.path.exists(CSV_FILE):
             logger.error(f"Chaos-FILE: Numbers file not found: {CSV_FILE}")
             print(f"{Fore.RED}Chaos-FILE: Numbers file not found: {CSV_FILE}{Style.RESET_ALL}")
             sys.exit(1)
+        
+        start_time = time.time()
         mode = select_mode()
         if mode == "mode2" and os.getenv("STARTUP_MODE") != "non_interactive":
             display_autograb_codes()
         if mode == "mode1":
             smtp_configs, message_file, subjects, rotate_subjects, selected_subject = get_configs_mode1()
-            send_bulk_sms(
+            results = send_bulk_sms(
                 numbers=load_numbers(CSV_FILE),
                 smtp_configs=smtp_configs,
                 subjects=subjects,
@@ -1308,7 +1262,7 @@ def main():
             )
         else:
             smtp_configs, message, subjects, rotate_subjects, selected_subject, links, rotate_links, selected_link = get_configs_mode2()
-            send_bulk_sms(
+            results = send_bulk_sms(
                 numbers=load_numbers(CSV_FILE),
                 smtp_configs=smtp_configs,
                 subjects=subjects,
@@ -1320,14 +1274,18 @@ def main():
                 rotate_links=rotate_links,
                 selected_link=selected_link
             )
+        duration = int(time.time() - start_time)
+        log_execution(duration)
         logger.info(f"Processed messages (ID: {chaos_id})")
+        print(f"\n{Fore.GREEN}Script completed in {duration} seconds. Processed: {len(results)} messages.{Style.RESET_ALL}")
+        
     except KeyboardInterrupt:
-        logger.info(f"Chaos-USER: Stopped by user (ID: {chaos_id})")
-        print(f"\n{Fore.YELLOW}Script stopped by user{Style.RESET_ALL}")
+        print(f"\n{Fore.YELLOW}Script interrupted by user.{Style.RESET_ALL}")
+        logger.info("Script interrupted by user")
         sys.exit(0)
     except Exception as e:
-        logger.error(f"Chaos-ERROR: Error: {str(e)} (ID: {chaos_id})")
-        print(f"\n{Fore.RED}Chaos-ERROR: Error: {str(e)}{Style.RESET_ALL}")
+        logger.error(f"Chaos-MAIN: {str(e)}")
+        print(f"{Fore.RED}Chaos-MAIN: An error occurred: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
 if __name__ == "__main__":
