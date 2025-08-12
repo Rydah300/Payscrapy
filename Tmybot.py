@@ -10,9 +10,9 @@ import pytz
 import os
 
 # Configuration (must match sms_serpent.py)
-GITHUB_TOKEN = "ghp_your_valid_pat_here"  # Replace with your GitHub PAT from sms_serpent.py
-TELEGRAM_TOKEN = "your_telegram_bot_token"  # Replace with your Telegram Bot Token from sms_serpent.py
-ADMIN_CHAT_ID = "your_admin_chat_id"  # Replace with your Telegram Chat ID from sms_serpent.py
+GITHUB_TOKEN = "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"  # Replace with your GitHub PAT from sms_serpent.py
+TELEGRAM_TOKEN = "8364609882:AAFIZerZkAbcdYuRwzdxtjpPxgri_PWLc1M"  # Replace with your Telegram Bot Token from sms_serpent.py
+ADMIN_CHAT_ID = "7926187033"  # Replace with your Telegram Chat ID from sms_serpent.py
 MASTER_GIST_ID = "master_licenses"  # Matches sms_serpent.py
 BASE_GIST_URL = "https://api.github.com/gists"
 LOG_FILE = os.path.join(os.path.expanduser("~"), ".chaos-serpent", "serpent_bot.log")
