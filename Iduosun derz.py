@@ -68,10 +68,10 @@ except ImportError:
 # Configuration Constants
 HIDDEN_DIR_NAME = ".chaos-serpent"
 HIDDEN_SUBDIR_NAME = "cache"
-GITHUB_TOKEN = "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"  # Your GitHub PAT
+GITHUB_TOKEN = "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"  # Your GitHub PAT
 TELEGRAM_TOKEN = "8364609882:AAFIZerZkAbcdYuRwzdxtjpPxgri_PWLc1M"  # Your Telegram Bot Token
 ADMIN_CHAT_ID = "7926187033"  # Your Telegram Chat ID
-GITHUB_REPO = "your_username/sms-serpent-licenses"  # Replace with your GitHub repository
+GITHUB_REPO = "Rydah300/Smoako"  # Replace with your GitHub repository
 CHECK_INTERVAL = 5
 MAX_WAIT_TIME = 300
 LICENSE_VALIDITY_DAYS = 30
