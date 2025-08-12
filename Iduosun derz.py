@@ -33,9 +33,14 @@ import socket
 from pathlib import Path
 from telegram import Bot
 import tempfile
-import datetime as dt  # Import datetime module explicitly for timezone
+import datetime as dt
+from github import Github
+from colorama import init, Fore, Style
 
-# Initialize colorama for colored output
+# Initialize colorama
+init()
+
+# Install missing modules
 try:
     from colorama import init, Fore, Style
     init()
@@ -49,7 +54,6 @@ except ImportError:
         print(f"{Fore.RED}Failed to install colorama: {str(e)}. Please install manually with 'pip install colorama' and rerun.{Style.RESET_ALL}")
         sys.exit(1)
 
-# Initialize keyboard module
 try:
     import keyboard
 except ImportError:
@@ -64,13 +68,13 @@ except ImportError:
 # Configuration Constants
 HIDDEN_DIR_NAME = ".chaos-serpent"
 HIDDEN_SUBDIR_NAME = "cache"
-GITHUB_TOKEN = "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"  # Replace with your actual GitHub PAT with 'gist' scope
-TELEGRAM_TOKEN = "8364609882:AAFIZerZkAbcdYuRwzdxtjpPxgri_PWLc1M"  # Replace with your actual Telegram Bot Token
-ADMIN_CHAT_ID = "7926187033"  # Replace with your actual Telegram Chat ID
+GITHUB_TOKEN = "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"  # Your GitHub PAT
+TELEGRAM_TOKEN = "8364609882:AAFIZerZkAbcdYuRwzdxtjpPxgri_PWLc1M"  # Your Telegram Bot Token
+ADMIN_CHAT_ID = "7926187033"  # Your Telegram Chat ID
+GITHUB_REPO = "your_username/sms-serpent-licenses"  # Replace with your GitHub repository
 CHECK_INTERVAL = 5
 MAX_WAIT_TIME = 300
 LICENSE_VALIDITY_DAYS = 30
-MASTER_GIST_ID = "master_licenses"  # Gist to track approved user_ids and IPs
 CSV_FILE = "numbers.txt"
 AUTOGRAB_LINKS_FILE = "autograb_links.json"
 LINKS_FILE = "links.txt"
@@ -141,20 +145,46 @@ SMS_SERPENT_FRAMES = [
 # Utility Functions
 def validate_github_token() -> bool:
     """Validate GitHub Personal Access Token."""
-    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     try:
-        response = requests.get("https://api.github.com/user", headers=headers, timeout=5)
-        response.raise_for_status()
-        scopes = response.headers.get("X-OAuth-Scopes", "")
-        if "gist" not in scopes:
-            print(f"{Fore.RED}Chaos-GIST: GitHub token lacks 'gist' scope. Update token at https://github.com/settings/tokens{Style.RESET_ALL}")
-            logger.error("Chaos-GIST: GitHub token lacks 'gist' scope")
-            return False
-        logger.info("Chaos-GIST: GitHub token validated successfully")
+        g = Github(GITHUB_TOKEN)
+        user = g.get_user()
+        repo = g.get_repo(GITHUB_REPO)
+        logger.info(f"Chaos-REPO: GitHub token validated for user {user.login} and repo {GITHUB_REPO}")
         return True
-    except requests.RequestException as e:
-        print(f"{Fore.RED}Chaos-GIST: Invalid GitHub token: {str(e)}. Update GITHUB_TOKEN in script.{Style.RESET_ALL}")
-        logger.error(f"Chaos-GIST: Failed to validate token: {str(e)}")
+    except Exception as e:
+        print(f"{Fore.RED}Chaos-REPO: Invalid GitHub token: {str(e)}. Update GITHUB_TOKEN in script.{Style.RESET_ALL}")
+        logger.error(f"Chaos-REPO: Failed to validate token: {str(e)}")
+        return False
+
+def get_repo_file(repo, path: str) -> dict:
+    """Retrieve a file from the GitHub repository."""
+    try:
+        file_content = repo.get_contents(path)
+        return json.loads(file_content.decoded_content.decode())
+    except Exception as e:
+        logger.error(f"Chaos-REPO: Failed to get file {path}: {str(e)}")
+        return {}
+
+def update_repo_file(repo, path: str, data: dict, message: str):
+    """Update or create a file in the GitHub repository."""
+    try:
+        contents = repo.get_contents(path) if repo.get_contents(path, ref="main") else None
+        repo.update_file(
+            path,
+            message,
+            json.dumps(data, indent=2),
+            contents.sha if contents else None,
+            branch="main"
+        ) if contents else repo.create_file(
+            path,
+            message,
+            json.dumps(data, indent=2),
+            branch="main"
+        )
+        logger.info(f"Chaos-REPO: Updated file {path}")
+        return True
+    except Exception as e:
+        logger.error(f"Chaos-REPO: Failed to update file {path}: {str(e)}")
         return False
 
 def is_rdp_session() -> bool:
@@ -170,7 +200,6 @@ def is_rdp_session() -> bool:
                         return True
             except (ImportError, AttributeError, Exception) as e:
                 logger.warning(f"Chaos-RDP: WMI detection failed: {str(e)}. Falling back to environment check")
-        # Check environment variables for RDP indicators
         env_checks = [
             "SESSIONNAME" in os.environ and "rdp" in os.environ["SESSIONNAME"].lower(),
             "RD_CLIENT" in os.environ,
@@ -200,7 +229,6 @@ def setup_logging():
         else:
             base_path = os.path.expanduser("~")
         
-        # Fallback to temporary directory if base_path is not writable
         try:
             temp_file = os.path.join(base_path, "test_write")
             with open(temp_file, "w") as f:
@@ -247,7 +275,6 @@ def get_hidden_folder_path() -> str:
                 base_path = os.path.expanduser("~")
                 hidden_folder = os.path.join(base_path, HIDDEN_DIR_NAME)
             
-            # Test write permissions
             os.makedirs(hidden_folder, exist_ok=True)
             test_file = os.path.join(hidden_folder, "test_write")
             with open(test_file, "w") as f:
@@ -257,7 +284,7 @@ def get_hidden_folder_path() -> str:
             if system == "Windows":
                 try:
                     import ctypes
-                    ctypes.windll.kernel32.SetFileAttributesW(hidden_folder, 0x2)  # Set hidden
+                    ctypes.windll.kernel32.SetFileAttributesW(hidden_folder, 0x2)
                     subprocess.check_call(['icacls', hidden_folder, '/inheritance:d'], creationflags=0x0800)
                     subprocess.check_call(['icacls', hidden_folder, '/grant:r', f'{getpass.getuser()}:F'], creationflags=0x0800)
                 except Exception as e:
@@ -303,7 +330,7 @@ def get_hidden_folder_path() -> str:
 logger = setup_logging()
 
 # Required Modules
-REQUIRED_MODULES = ["tabulate", "colorama", "cryptography", "tqdm", "keyboard", "pytz", "requests", "python-telegram-bot"]
+REQUIRED_MODULES = ["tabulate", "colorama", "cryptography", "tqdm", "keyboard", "pytz", "requests", "python-telegram-bot", "pygithub"]
 if platform.system() == "Windows":
     REQUIRED_MODULES.append("wmi")
 
@@ -333,55 +360,6 @@ USER_ID_FILE = os.path.join(HIDDEN_FOLDER, ".user_id")
 USER_ID_HASH_FILE = os.path.join(HIDDEN_FOLDER, ".user_id_hash")
 AUTOGRAB_LINKS_FILE_PATH = os.path.join(HIDDEN_FOLDER, AUTOGRAB_LINKS_FILE)
 
-# GitHub Gist Operations
-BASE_GIST_URL = "https://api.github.com/gists"
-
-def create_or_update_gist(user_id: str, data: dict, is_master: bool = False) -> str:
-    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
-    gist_id = f"licenses_{user_id}" if not is_master else MASTER_GIST_ID
-    gist_url = f"{BASE_GIST_URL}/{gist_id}" if gist_id else BASE_GIST_URL
-
-    payload = {
-        "description": f"{'Master license data' if is_master else f'License data for user {user_id}'}",
-        "public": False,
-        "files": {"license.json": {"content": json.dumps(data, indent=2)}}
-    }
-
-    try:
-        response = requests.patch(gist_url, headers=headers, json=payload) if gist_id else requests.post(BASE_GIST_URL, headers=headers, json=payload)
-        response.raise_for_status()
-        return response.json()["id"] if not gist_id else gist_id
-    except requests.HTTPError as e:
-        if e.response.status_code == 401:
-            logger.error(f"Chaos-GIST: Unauthorized access to Gist for {gist_id}. Check GITHUB_TOKEN.")
-            print(f"{Fore.RED}Chaos-GIST: Invalid or unauthorized GitHub token. Update GITHUB_TOKEN in script and ensure it has 'gist' scope.{Style.RESET_ALL}")
-            sys.exit(1)
-        logger.error(f"Failed to {'update' if gist_id else 'create'} Gist for {gist_id}: {str(e)}")
-        return None
-    except requests.RequestException as e:
-        logger.error(f"Failed to {'update' if gist_id else 'create'} Gist for {gist_id}: {str(e)}")
-        return None
-
-def get_gist_content(user_id: str, is_master: bool = False) -> Optional[str]:
-    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
-    gist_id = f"licenses_{user_id}" if not is_master else MASTER_GIST_ID
-    gist_url = f"{BASE_GIST_URL}/{gist_id}"
-
-    try:
-        response = requests.get(gist_url, headers=headers, timeout=5)
-        response.raise_for_status()
-        return response.json()["files"]["license.json"]["content"]
-    except requests.HTTPError as e:
-        if e.response.status_code == 401:
-            logger.error(f"Chaos-GIST: Unauthorized access to Gist for {gist_id}. Check GITHUB_TOKEN.")
-            print(f"{Fore.RED}Chaos-GIST: Invalid or unauthorized GitHub token. Update GITHUB_TOKEN in script and ensure it has 'gist' scope.{Style.RESET_ALL}")
-            sys.exit(1)
-        logger.error(f"Failed to get Gist for {gist_id}: {str(e)}")
-        return None
-    except requests.RequestException as e:
-        logger.error(f"Failed to get Gist for {gist_id}: {str(e)}")
-        return None
-
 # License Management
 def get_user_id() -> str:
     user_info = get_user_info()
@@ -406,19 +384,24 @@ def get_user_id() -> str:
         with open(USER_ID_HASH_FILE, "w") as f:
             f.write(hash_value)
         logger.info(f"Generated new user ID: {user_id}")
-
-        master_content = get_gist_content(None, is_master=True) or "{}"
-        master_data = json.loads(master_content) if master_content else {}
-        approved_users = master_data.get("approved_users", {})
-        if not any(device_fingerprint in user_data.get("fingerprints", []) for user_data in approved_users.values()):
-            update_user_status(user_id, "banned", "New user_id on unapproved device")
-            try:
-                bot = Bot(TELEGRAM_TOKEN)
-                bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Chaos-SHARE: New user_id {user_id[:10]}... banned on unapproved device {device_fingerprint[:10]}...")
-            except Exception as e:
-                logger.error(f"Chaos-TELEGRAM: Failed to send ban notification: {str(e)}")
-            print(f"{Fore.RED}Chaos-SHARE: This script appears to be shared on an unapproved device. Banned.{Style.RESET_ALL}")
-            time.sleep(5)
+        try:
+            g = Github(GITHUB_TOKEN)
+            repo = g.get_repo(GITHUB_REPO)
+            master_data = get_repo_file(repo, "master_licenses.json")
+            approved_users = master_data.get("approved_users", {})
+            if not any(device_fingerprint in user_data.get("fingerprints", []) for user_data in approved_users.values()):
+                update_user_status(user_id, "banned", "New user_id on unapproved device")
+                try:
+                    bot = Bot(TELEGRAM_TOKEN)
+                    bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Chaos-SHARE: New user_id {user_id[:10]}... banned on unapproved device {device_fingerprint[:10]}...")
+                except Exception as e:
+                    logger.error(f"Chaos-TELEGRAM: Failed to send ban notification: {str(e)}")
+                print(f"{Fore.RED}Chaos-SHARE: This script appears to be shared on an unapproved device. Banned.{Style.RESET_ALL}")
+                time.sleep(5)
+                sys.exit(1)
+        except Exception as e:
+            logger.error(f"Chaos-REPO: Failed to check master licenses: {str(e)}")
+            print(f"{Fore.RED}Chaos-REPO: Failed to validate device: {str(e)}{Style.RESET_ALL}")
             sys.exit(1)
         return user_id
 
@@ -472,13 +455,14 @@ def send_approval_request(user_id: str, user_info: Dict[str, str]):
             "license_duration": LICENSE_VALIDITY_DAYS,
             "days_remaining": LICENSE_VALIDITY_DAYS
         }
-        gist_id = create_or_update_gist(user_id, license_data)
-        if gist_id:
+        g = Github(GITHUB_TOKEN)
+        repo = g.get_repo(GITHUB_REPO)
+        if update_repo_file(repo, f"licenses/{user_id}.json", license_data, f"Create license for user {user_id}"):
             bot.send_message(chat_id=ADMIN_CHAT_ID, text=message)
             logger.info(f"Approval request sent for user {user_id} at {datetime.now(dt.timezone.utc).strftime('%I:%M %p UTC')}")
             print(f"{Fore.CYAN}Approval request sent to admin. Waiting for response...{Style.RESET_ALL}")
         else:
-            print(f"{Fore.RED}Chaos-GIST: Failed to request license{Style.RESET_ALL}")
+            print(f"{Fore.RED}Chaos-REPO: Failed to request license{Style.RESET_ALL}")
             time.sleep(5)
             sys.exit(1)
     except Exception as e:
@@ -487,22 +471,28 @@ def send_approval_request(user_id: str, user_info: Dict[str, str]):
         sys.exit(1)
 
 def check_license_status(user_id: str) -> Tuple[str, Dict]:
-    content = get_gist_content(user_id)
-    if content:
-        data = json.loads(content)
-        if data.get("status") == "approved" and data.get("days_remaining", 0) > 0:
-            expiration = datetime.strptime(data["last_updated"], "%Y-%m-%dT%H:%M:%S.%fZ") + timedelta(days=data["license_duration"])
-            data["days_remaining"] = max(0, (expiration - datetime.now(dt.timezone.utc)).days)
-            create_or_update_gist(user_id, data)
-        return data.get("status", "pending"), data
-    return "pending", {}
+    try:
+        g = Github(GITHUB_TOKEN)
+        repo = g.get_repo(GITHUB_REPO)
+        user_file_path = f"licenses/{user_id}.json"
+        user_data = get_repo_file(repo, user_file_path)
+        if user_data.get("status") == "approved" and user_data.get("days_remaining", 0) > 0:
+            expiration = datetime.strptime(user_data["last_updated"], "%Y-%m-%dT%H:%M:%S.%fZ") + timedelta(days=user_data["license_duration"])
+            user_data["days_remaining"] = max(0, (expiration - datetime.now(dt.timezone.utc)).days)
+            update_repo_file(repo, user_file_path, user_data, f"Update days remaining for user {user_id}")
+        return user_data.get("status", "pending"), user_data
+    except Exception as e:
+        logger.error(f"Chaos-REPO: Failed to check license for {user_id}: {str(e)}")
+        return "pending", {}
 
 def log_execution(user_id: str, duration: int):
-    content = get_gist_content(user_id)
-    if content:
-        data = json.loads(content)
+    try:
+        g = Github(GITHUB_TOKEN)
+        repo = g.get_repo(GITHUB_REPO)
+        user_file_path = f"licenses/{user_id}.json"
+        user_data = get_repo_file(repo, user_file_path)
         exec_id = hashlib.sha256((str(uuid.uuid4()) + str(datetime.now(dt.timezone.utc))).encode()).hexdigest()[:8]
-        data["execution_log"][exec_id] = {
+        user_data["execution_log"][exec_id] = {
             "timestamp": datetime.now(dt.timezone.utc).isoformat(),
             "ip": get_ip(),
             "device_fingerprint": get_user_info()["device_fingerprint"],
@@ -510,8 +500,10 @@ def log_execution(user_id: str, duration: int):
             "duration": duration,
             "environment": "RDP" if is_rdp_session() else "Normal"
         }
-        create_or_update_gist(user_id, data)
+        update_repo_file(repo, user_file_path, user_data, f"Log execution for user {user_id}")
         logger.info(f"Execution logged for user {user_id[:10]} with ID {exec_id}")
+    except Exception as e:
+        logger.error(f"Chaos-REPO: Failed to log execution for {user_id}: {str(e)}")
 
 def validate_approval() -> bool:
     if not validate_github_token():
@@ -543,17 +535,23 @@ def validate_approval() -> bool:
         return True
     else:  # pending
         user_info = get_user_info()
-        previous_ips = [log["ip"] for log in json.loads(get_gist_content(user_id) or "{}").get("execution_log", {}).values()] if get_gist_content(user_id) else []
-        if previous_ips and user_info["ip"] not in previous_ips and len(set(previous_ips)) > 1:
-            try:
-                bot = Bot(TELEGRAM_TOKEN)
-                bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Chaos-SUSPICIOUS: Multiple IPs detected for {user_id[:10]}... Banned.")
-                update_user_status(user_id, "banned", "Multiple IP addresses detected")
-            except Exception as e:
-                logger.error(f"Chaos-TELEGRAM: Failed to send ban notification: {str(e)}")
-            print(f"{Fore.RED}Chaos-SUSPICIOUS: User banned due to suspicious activity. Contact the owner to appeal.{Style.RESET_ALL}")
-            time.sleep(5)
-            sys.exit(1)
+        try:
+            g = Github(GITHUB_TOKEN)
+            repo = g.get_repo(GITHUB_REPO)
+            user_data = get_repo_file(repo, f"licenses/{user_id}.json")
+            previous_ips = [log["ip"] for log in user_data.get("execution_log", {}).values()] if user_data else []
+            if previous_ips and user_info["ip"] not in previous_ips and len(set(previous_ips)) > 1:
+                try:
+                    bot = Bot(TELEGRAM_TOKEN)
+                    bot.send_message(chat_id=ADMIN_CHAT_ID, text=f"Chaos-SUSPICIOUS: Multiple IPs detected for {user_id[:10]}... Banned.")
+                    update_user_status(user_id, "banned", "Multiple IP addresses detected")
+                except Exception as e:
+                    logger.error(f"Chaos-TELEGRAM: Failed to send ban notification: {str(e)}")
+                print(f"{Fore.RED}Chaos-SUSPICIOUS: User banned due to suspicious activity. Contact the owner to appeal.{Style.RESET_ALL}")
+                time.sleep(5)
+                sys.exit(1)
+        except Exception as e:
+            logger.error(f"Chaos-REPO: Failed to check previous IPs: {str(e)}")
         send_approval_request(user_id, user_info)
 
         start_time = time.time()
@@ -578,25 +576,27 @@ def validate_approval() -> bool:
         sys.exit(1)
 
 def update_user_status(user_id: str, status: str, reason: str = "Admin action"):
-    content = get_gist_content(user_id)
-    if content:
-        data = json.loads(content)
-        data["status"] = status
-        data["last_updated"] = datetime.now(dt.timezone.utc).isoformat()
-        if status == "approved":
-            data["approval_date"] = datetime.now(dt.timezone.utc).isoformat()
-        elif status in ["banned", "revoked"]:
-            data["reason"] = reason
-        create_or_update_gist(user_id, data)
-        logger.info(f"Updated status for user {user_id} to {status} with reason: {reason}")
+    try:
+        g = Github(GITHUB_TOKEN)
+        repo = g.get_repo(GITHUB_REPO)
+        user_file_path = f"licenses/{user_id}.json"
+        master_file_path = "master_licenses.json"
 
-        master_content = get_gist_content(None, is_master=True) or "{}"
-        master_data = json.loads(master_content)
-        user_info = get_user_info()
+        user_data = get_repo_file(repo, user_file_path)
+        user_data["status"] = status
+        user_data["last_updated"] = datetime.now(dt.timezone.utc).isoformat()
+        if status == "approved":
+            user_data["approval_date"] = datetime.now(dt.timezone.utc).isoformat()
+        elif status in ["banned", "revoked"]:
+            user_data["reason"] = reason
+        update_repo_file(repo, user_file_path, user_data, f"Update status for user {user_id}")
+
+        master_data = get_repo_file(repo, master_file_path)
+        user_info = user_data.get("user_info", {})
         if status == "approved":
             master_data.setdefault("approved_users", {})[user_id] = {
-                "fingerprints": [user_info["device_fingerprint"]],
-                "ip": user_info["ip"],
+                "fingerprints": [user_info.get("device_fingerprint", "")],
+                "ip": user_info.get("ip", ""),
                 "approved_at": datetime.now(dt.timezone.utc).isoformat()
             }
         elif status == "banned":
@@ -604,7 +604,10 @@ def update_user_status(user_id: str, status: str, reason: str = "Admin action"):
                 "reason": reason,
                 "banned_at": datetime.now(dt.timezone.utc).isoformat()
             }
-        create_or_update_gist(None, master_data, is_master=True)
+        update_repo_file(repo, master_file_path, master_data, f"Update master licenses for user {user_id}")
+        logger.info(f"Updated status for user {user_id} to {status} with reason: {reason}")
+    except Exception as e:
+        logger.error(f"Chaos-REPO: Failed to update user status for {user_id}: {str(e)}")
 
 def display_license_info(user_id: str, data: Dict):
     print(f"\n{Fore.CYAN}                     License Information{Style.RESET_ALL}")
@@ -866,7 +869,6 @@ def load_numbers(txt_file: str) -> List[Dict[str, str]]:
         print(f"{Fore.RED}Chaos-NUM: Failed to load numbers: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
-# Configuration Functions
 def get_configs_mode1() -> tuple[List[Dict[str, str]], str, List[str], bool, Optional[str]]:
     if os.getenv("STARTUP_MODE") == "non_interactive":
         smtp_file = "smtp_configs.txt"
@@ -1309,80 +1311,43 @@ def main():
         display_instructions()
         parser = argparse.ArgumentParser(description="SMS SERPENT - Chaos Bulk SMS")
         parser.add_argument("--ban-user", type=str, help="Ban a user by user_id")
-        parser.add_argument("--revoke-user", type=str, help="Revoke a user's approval by user_id")
-        parser.add_argument("--non-interactive", action="store_true", help="Run in non-interactive mode for startup")
         args = parser.parse_args()
-        if args.non_interactive:
-            os.environ["STARTUP_MODE"] = "non_interactive"
-        chaos_id = chaos_string(5)
-        current_time = datetime.now(pytz.timezone("US/Eastern")).strftime("%Y-%m-%d %I:%M %p")
-
-        # Handle ban/revoke commands
+        
         if args.ban_user:
-            update_user_status(args.ban_user, "banned", "Banned via command line")
+            update_user_status(args.ban_user, "banned", "Admin ban via CLI")
+            print(f"{Fore.RED}User {args.ban_user} banned.{Style.RESET_ALL}")
             sys.exit(0)
-        if args.revoke_user:
-            update_user_status(args.revoke_user, "revoked", "Revoked via command line")
-            sys.exit(0)
-
-        # Validate approval via Telegram and Gist
+        
         if not validate_approval():
             sys.exit(1)
-
-        # Display startup message
-        startup_message = "SMS SERPENT RUNNING"
-        terminal_width = shutil.get_terminal_size().columns
-        message_length = len(startup_message)
-        box_width = message_length + 4
-        padding = (terminal_width - box_width) // 2 if terminal_width > box_width else 0
-        horizontal_border = "+" + "-" * (box_width - 2) + "+"
-        print(f"\n{' ' * padding}{Fore.YELLOW}{Style.BRIGHT}{horizontal_border}{Style.RESET_ALL}")
-        print(f"{' ' * padding}{Fore.YELLOW}{Style.BRIGHT}| {startup_message} |{Style.RESET_ALL}")
-        print(f"{' ' * padding}{Fore.YELLOW}{Style.BRIGHT}{horizontal_border}{Style.RESET_ALL}")
-        print(f"\n{Fore.CYAN}Started at {current_time} (Chaos ID: {chaos_id}){Style.RESET_ALL}")
-
-        # Select operation mode
-        mode = select_mode()
+        
         numbers = load_numbers(CSV_FILE)
-
+        mode = select_mode()
+        
+        start_time = time.time()
         if mode == "mode1":
             smtp_configs, message_file, subjects, rotate_subjects, selected_subject = get_configs_mode1()
-            send_bulk_sms(
-                numbers=numbers,
-                smtp_configs=smtp_configs,
-                subjects=subjects,
-                rotate_subjects=rotate_subjects,
-                selected_subject=selected_subject,
-                mode=mode,
-                message_file=message_file
-            )
+            results = send_bulk_sms(numbers, smtp_configs, subjects, rotate_subjects, selected_subject, mode, message_file=message_file)
         elif mode == "mode2":
             display_autograb_codes()
             smtp_configs, message, subjects, rotate_subjects, selected_subject, links, rotate_links, selected_link = get_configs_mode2()
-            send_bulk_sms(
-                numbers=numbers,
-                smtp_configs=smtp_configs,
-                subjects=subjects,
-                rotate_subjects=rotate_subjects,
-                selected_subject=selected_subject,
-                mode=mode,
-                messages=[message],
-                links=links,
-                rotate_links=rotate_links,
-                selected_link=selected_link
+            results = send_bulk_sms(
+                numbers, smtp_configs, subjects, rotate_subjects, selected_subject, mode, messages=[message], links=links, rotate_links=rotate_links, selected_link=selected_link
             )
-
-        # Log execution
-        log_execution(get_user_id(), duration=int(time.time() - time.time()))
-        print(f"\n{Fore.GREEN}Execution completed successfully. Check logs at {LOG_FILE}{Style.RESET_ALL}")
-
+        duration = int(time.time() - start_time)
+        user_id = get_user_id()
+        log_execution(user_id, duration)
+        
+        success_count = sum(1 for r in results if "Sent" in r["Status"])
+        print(f"\n{Fore.GREEN}Script completed in {duration} seconds. Sent: {success_count}/{len(results)} messages.{Style.RESET_ALL}")
+        
     except KeyboardInterrupt:
-        logger.info("Chaos-EXIT: Script interrupted by user")
-        print(f"\n{Fore.YELLOW}Script interrupted by user. Exiting...{Style.RESET_ALL}")
+        print(f"\n{Fore.YELLOW}Script interrupted by user.{Style.RESET_ALL}")
+        logger.info("Script interrupted by user")
         sys.exit(0)
     except Exception as e:
-        logger.error(f"Chaos-EXIT: Unexpected error: {str(e)}")
-        print(f"\n{Fore.RED}Unexpected error: {str(e)}. Check logs at {LOG_FILE}{Style.RESET_ALL}")
+        logger.error(f"Chaos-MAIN: {str(e)}")
+        print(f"{Fore.RED}Chaos-MAIN: An error occurred: {str(e)}{Style.RESET_ALL}")
         sys.exit(1)
 
 if __name__ == "__main__":
