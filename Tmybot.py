@@ -7,6 +7,7 @@ import requests
 import hashlib
 from datetime import datetime, timedelta
 import pytz
+from typing import Optional  # Added import for Optional
 
 # Setup logging
 logging.basicConfig(
@@ -42,7 +43,7 @@ def create_or_update_gist(user_id: str, data: dict) -> str:
         logger.error(f"Failed to {'update' if gist_id else 'create'} Gist for {user_id}: {e}")
         return None
 
-def get_gist_content(user_id: str) -> Optional[str]:
+def get_gist_content(user_id: str) -> Optional[str]:  # Line 45
     headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     gist_id = f"licenses_{user_id}"
     gist_url = f"{BASE_GIST_URL}/{gist_id}"
