@@ -107,10 +107,9 @@ def install_missing_modules():
 install_missing_modules()
 
 # Telegram and GitHub Gist Configuration
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")  # Replace with your bot token from BotFather
-ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")  # Your Telegram user ID
-BASE_GIST_URL = "https://api.github.com/gists"
+GITHUB_TOKEN = "your_github_personal_access_token"  # Replace with your actual GitHub PAT
+TELEGRAM_TOKEN = "your_telegram_bot_token"          # Replace with your actual Telegram Bot Token
+ADMIN_CHAT_ID = "your_chat_id"                     # Replace with your actual Telegram Chat ID
 USER_ID_FILE = os.path.join(get_hidden_folder_path(), ".user_id")
 USER_ID_HASH_FILE = os.path.join(get_hidden_folder_path(), ".user_id_hash")
 CHECK_INTERVAL = 5
