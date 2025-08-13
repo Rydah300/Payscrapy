@@ -596,7 +596,7 @@ def check_spam_content(messages: List[str]) -> List[Dict[str, any]]:
     ]
 
 def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
-    """Load and validate SMTP configurations."""
+    """Load and validate SMTP configurations, including sender_name."""
     try:
         if not os.path.exists(smtp_file):
             logger.error(f"Chaos-FILE: File not found: {smtp_file}")
@@ -628,6 +628,11 @@ def load_smtp_configs(smtp_file: str) -> List[Dict[str, str]]:
             missing = [field for field in required_fields if field not in config or not config[field]]
             if missing:
                 logger.error(f"Chaos-SMTP: Missing fields {missing} for {config.get('username', 'unknown')}")
+                continue
+            # Validate sender_name to be alphabetic, alphanumeric, or numeric (max 15 chars)
+            sender_name = config["sender_name"]
+            if not re.match(r'^[a-zA-Z0-9 ]+$', sender_name) or len(sender_name) > 15:
+                logger.error(f"Chaos-SMTP: Invalid sender_name '{sender_name}' for {config.get('username', 'unknown')}. Must be letters, numbers, or spaces, max 15 chars.")
                 continue
             try:
                 config["port"] = int(config["port"])
@@ -964,20 +969,23 @@ def send_sms(
     links: Optional[List[str]] = None,
     max_retries: int = MAX_RETRIES
 ) -> Tuple[bool, str, str, str, float]:
-    """Send an SMS via email-to-SMS gateway."""
+    """Send an SMS via email-to-SMS gateway with sender ID spoofing."""
     message = process_autograb_codes(message, link, links, recipient_email)
     if len(message) > 160:
         message = message[:157] + "..."
     score = analyze_spam_content(message)
     attempt = 0
+    # Use sender_name from smtp_configs.txt with random suffix for spoofing
+    spoofed_sender = f"{sender_name} {chaos_string(3)}"
     while attempt <= max_retries:
         try:
             msg = MIMEText(message, "plain", "utf-8")
             msg["Subject"] = Header(subject, "utf-8")
-            msg["From"] = formataddr((sender_name, sender_email))
+            msg["From"] = formataddr((spoofed_sender, sender_email))
             msg["To"] = recipient_email
             smtp.sendmail(sender_email, recipient_email, msg.as_string())
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            logger.info(f"Carrier for {recipient_email}: {recipient_email.split('@')[1]}, Sender Name: {spoofed_sender}")
             logger.info(f"Sent to {recipient_email} at {timestamp} (ID: {chaos_id})")
             return True, timestamp, message[:CONTENT_SNIPPET_LENGTH], subject, score
         except Exception as e:
@@ -1048,7 +1056,7 @@ def worker(
                 smtp.starttls()
                 smtp.login(smtp_config["username"], smtp_config["password"])
                 recipient_email = number_info["phone_number"]
-                sender_name = f"{smtp_config['sender_name']} {chaos_string(3)}"
+                sender_name = smtp_config["sender_name"]  # Use sender_name from smtp_configs
                 message = get_message(messages, rotate_messages, selected_message)
                 subject = get_subject(subjects, rotate_subjects, selected_subject)
                 link = next(link_iterator) if link_iterator else selected_link
