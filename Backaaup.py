@@ -127,10 +127,10 @@ CARRIER_GATEWAYS = {
 
 # Owner Information
 OWNER_INFO = [
-    {"Field": f"{Fore.YELLOW}Owner Name{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}John Doe{Style.RESET_ALL}"},
-    {"Field": f"{Fore.YELLOW}Email{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}john.doe@example.com{Style.RESET_ALL}"},
-    {"Field": f"{Fore.YELLOW}Twitter{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}@JohnDoe{Style.RESET_ALL}"},
-    {"Field": f"{Fore.YELLOW}GitHub{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}@JohnDoeDev{Style.RESET_ALL}"}
+    {"Field": f"{Fore.YELLOW}Owner Name{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}DevSerpent{Style.RESET_ALL}"},
+    {"Field": f"{Fore.YELLOW}Email{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}EvilSerpentAdmin@gmail.com{Style.RESET_ALL}"},
+    {"Field": f"{Fore.YELLOW}Telegram{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}t.me/DevSerpent{Style.RESET_ALL}"},
+    {"Field": f"{Fore.YELLOW}Channel{Style.RESET_ALL}", "Value": f"{Fore.YELLOW}t.me/TheEvilSerpent{Style.RESET_ALL}"}
 ]
 
 # ASCII Logo
@@ -142,8 +142,8 @@ SMS_SERPENT_FRAMES = [
     f"     /________\\ \\  / |  | |         | |  | |____| |____     | |   \n" \
     f"                \\/  |/  |_|         |_|  |______|______|    |_|   \n" \
     f"{Fore.CYAN}     ~~~:---:~~~{Style.RESET_ALL}\n" \
-    f"{Fore.CYAN}     ~~:---:~~~  S S S S S E R P E N T  ~~~:---:~~{Style.RESET_ALL}\n" \
-    f"{Fore.MAGENTA}     ~~:---:~~~  HACKVERSE DOMINION MODE ~~~:---:~~{Style.RESET_ALL}\n" \
+    f"{Fore.CYAN}     ~~:---:~~~  S M S S E R P E N T  ~~~:---:~~{Style.RESET_ALL}\n" \
+    f"{Fore.MAGENTA}     ~~:---:~~~ By:@DevSerpent ~~~:---:~~{Style.RESET_ALL}\n" \
     f"{Fore.CYAN}     ~~:---:~~~ ~~~~~~~~~~~~~~~~~~~~~~~~~:---:~~{Style.RESET_ALL}"
 ]
 
