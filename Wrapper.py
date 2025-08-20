@@ -22,17 +22,22 @@ def find_advanced_installer_path():
     if env_path and os.path.exists(env_path):
         return env_path
     
-    # Check common installation paths
-    base_path = r"C:\Program Files (x86)\Caphyon\Advanced Installer 22.9.1\bin\x86\AdvancedInstaller.com"
-    if os.path.exists(base_path):
-        for version_folder in os.listdir(base_path):
-            cli_path = os.path.join(base_path, version_folder, "bin", "x86", "AdvancedInstaller.com")
-            if os.path.exists(cli_path):
-                return cli_path
+    # Check common installation directories
+    possible_paths = [
+        r"C:\Program Files (x86)\Caphyon\Advanced Installer",
+        r"C:\Program Files\Caphyon\Advanced Installer",
+    ]
+    for base_path in possible_paths:
+        if os.path.exists(base_path):
+            for root, _, files in os.walk(base_path):
+                if "AdvancedInstaller.com" in files:
+                    cli_path = os.path.join(root, "AdvancedInstaller.com")
+                    if os.path.exists(cli_path):
+                        return cli_path
     
     return None
 
-ADVANCED_INSTALLER_PATH = find_advanced_installer_path() or r"C:\Program Files (x86)\Caphyon\Advanced Installer 22.9.1\bin\x86\AdvancedInstaller.com"
+ADVANCED_INSTALLER_PATH = find_advanced_installer_path() or r"C:\Program Files (x86)\Caphyon\\Advanced Installer 22.9.1\bin\\x86\AdvancedInstaller.com"
 
 def is_admin():
     """Check if the script is running with administrative privileges."""
@@ -44,9 +49,10 @@ def is_admin():
 def verify_advanced_installer_path():
     """Verify that the Advanced Installer CLI is accessible."""
     if not os.path.exists(ADVANCED_INSTALLER_PATH):
-        print(f"Warning: Advanced Installer CLI not found at: {ADVANCED_INSTALLER_PATH}")
-        print("Please install Advanced Installer from https://www.advancedinstaller.com/download.html")
-        print("Skipping metadata modification and wrapper creation.")
+        print(f"Error: Advanced Installer CLI not found at: {ADVANCED_INSTALLER_PATH}")
+        print("Please install Advanced Installer (Freeware edition) from https://www.advancedinstaller.com/download.html")
+        print("Run the installer as administrator using: msiexec /i AdvancedInstaller.msi")
+        print("Falling back to basic MSI processing without metadata modification or wrapping.")
         return False
     try:
         result = subprocess.run([ADVANCED_INSTALLER_PATH, "/help"], capture_output=True, text=True, check=True)
@@ -54,9 +60,11 @@ def verify_advanced_installer_path():
         return True
     except subprocess.CalledProcessError as e:
         print(f"Warning: Cannot execute Advanced Installer CLI: {e.stderr}")
+        print("Falling back to basic MSI processing.")
         return False
     except Exception as e:
         print(f"Warning: Error accessing Advanced Installer CLI: {e}")
+        print("Falling back to basic MSI processing.")
         return False
 
 def set_file_permissions(path):
