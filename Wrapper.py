@@ -24,8 +24,8 @@ def find_advanced_installer_path():
     
     # Check common installation directories
     possible_paths = [
-        r"C:\Program Files (x86)\Caphyon\Advanced Installer",
-        r"C:\Program Files\Caphyon\Advanced Installer",
+        r"C:\Program Files (x86)\Caphyon\Advanced Installer 22.9.1",
+        r"C:\Program Files\Caphyon\Advanced Installer 22.9.1",
     ]
     for base_path in possible_paths:
         if os.path.exists(base_path):
@@ -37,7 +37,7 @@ def find_advanced_installer_path():
     
     return None
 
-ADVANCED_INSTALLER_PATH = find_advanced_installer_path() or r"C:\Program Files (x86)\Caphyon\\Advanced Installer 22.9.1\bin\\x86\AdvancedInstaller.com"
+ADVANCED_INSTALLER_PATH = find_advanced_installer_path() or r"C:\Program Files (x86)\Caphyon\Advanced Installer 22.9.1\bin\x86\AdvancedInstaller.com"
 
 def is_admin():
     """Check if the script is running with administrative privileges."""
