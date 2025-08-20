@@ -301,7 +301,7 @@ if __name__ == "__main__":
             print(Fore.GREEN + "[+] Using original EXE without wrapping." + Style.RESET_ALL)
             return exe_path
         
-        # Run pyinstaller in non-admin context
+        # Run pyinstaller in current (admin) context
         cmd = [
             "pyinstaller",
             "--onefile",
@@ -313,15 +313,7 @@ if __name__ == "__main__":
         ]
         print(Fore.GREEN + f"[+] Executing pyinstaller command: {' '.join(cmd)}" + Style.RESET_ALL)
         
-        # Run as non-admin using runas (assumes 'Admin' user has non-admin privileges available)
-        try:
-            # Use a non-admin command prompt to run pyinstaller
-            non_admin_cmd = ["runas", "/user:Admin", f"cmd.exe /c {' '.join(cmd)}"]
-            result = subprocess.run(non_admin_cmd, capture_output=True, text=True, check=True, timeout=300)
-        except subprocess.CalledProcessError as e:
-            print(Fore.RED + f"[+] Error running pyinstaller as non-admin: {e.stderr} (Exit code: {e.returncode})" + Style.RESET_ALL)
-            print(Fore.GREEN + "[+] Attempting to run pyinstaller with current privileges..." + Style.RESET_ALL)
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=600)
         
         # Locate the generated EXE
         generated_exe = os.path.join(temp_dir, "dist", product_name + ".exe")
