@@ -32,7 +32,7 @@ def find_advanced_installer_path():
     
     return None
 
-ADVANCED_INSTALLER_PATH = find_advanced_installer_path() or r"C:\Program Files (x86)\Caphyon\Advanced Installer\bin\x86\AdvancedInstaller.com"
+ADVANCED_INSTALLER_PATH = find_advanced_installer_path() or r"C:\Program Files (x86)\Caphyon\Advanced Installer 22.9.1\bin\x86\AdvancedInstaller.com"
 
 def is_admin():
     """Check if the script is running with administrative privileges."""
