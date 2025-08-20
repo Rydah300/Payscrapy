@@ -247,15 +247,31 @@ def remove_motw(file_path):
     except Exception as e:
         print(Fore.RED + f"[+] Warning: Error removing MotW: {e}" + Style.RESET_ALL)
 
-def simulate_downloads(file_path, count=2000):
-    """Simulate multiple downloads to build reputation."""
+def simulate_downloads(file_path, count=500):
+    """Simulate multiple downloads to build reputation with retries for file deletion."""
     print(Fore.GREEN + f"[+] Simulating {count} downloads for {file_path} to build reputation..." + Style.RESET_ALL)
     for i in range(count):
         temp_path = os.path.join(OUTPUT_DIR, f"temp_{generate_random_string()}.exe")
-        shutil.copyfile(file_path, temp_path)
-        time.sleep(0.02)
-        os.remove(temp_path)
-        if (i + 1) % 500 == 0:
+        try:
+            shutil.copyfile(file_path, temp_path)
+            set_file_permissions(temp_path)
+            time.sleep(0.1)  # Increased delay to reduce file system load
+            # Retry deletion up to 3 times
+            for attempt in range(3):
+                try:
+                    os.remove(temp_path)
+                    break
+                except PermissionError as e:
+                    print(Fore.RED + f"[+] Warning: Failed to delete {temp_path} (attempt {attempt+1}/3): {e}" + Style.RESET_ALL)
+                    time.sleep(0.5)  # Wait before retrying
+                except Exception as e:
+                    print(Fore.RED + f"[+] Warning: Error deleting {temp_path}: {e}" + Style.RESET_ALL)
+                    break
+            else:
+                print(Fore.RED + f"[+] Error: Failed to delete {temp_path} after 3 attempts. Continuing..." + Style.RESET_ALL)
+        except Exception as e:
+            print(Fore.RED + f"[+] Warning: Error during download simulation for {temp_path}: {e}" + Style.RESET_ALL)
+        if (i + 1) % 100 == 0:
             print(Fore.GREEN + f"[+] Simulated download {i+1}/{count}" + Style.RESET_ALL)
     print(Fore.GREEN + "[+] Download simulation complete. This may help build SmartScreen reputation." + Style.RESET_ALL)
 
@@ -384,7 +400,7 @@ def main():
         signed_exe_path = embed_fake_signature(exe_path, temp_dir)
         timestamped_exe_path = modify_timestamp(signed_exe_path)
         padded_exe_path = pad_file(timestamped_exe_path, temp_dir)
-        simulate_downloads(padded_exe_path, count=2000)
+        simulate_downloads(padded_exe_path, count=500)
         final_exe_path = create_exe_wrapper(padded_exe_path, OUTPUT_DIR, original_filename, temp_dir)
         
         final_output_path = os.path.join(OUTPUT_DIR, original_filename)
