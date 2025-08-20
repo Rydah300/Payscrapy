@@ -313,12 +313,18 @@ if __name__ == "__main__":
         ]
         print(Fore.GREEN + f"[+] Executing pyinstaller command: {' '.join(cmd)}" + Style.RESET_ALL)
         
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        print(Fore.GREEN + f"[+] PyInstaller stdout: {result.stdout}" + Style.RESET_ALL)
+        if result.stderr:
+            print(Fore.RED + f"[+] PyInstaller stderr: {result.stderr}" + Style.RESET_ALL)
         
-        # Locate the generated EXE
-        generated_exe = os.path.join(temp_dir, "dist", product_name + ".exe")
+        # Check if dist directory exists
+        dist_dir = os.path.join(temp_dir, "dist")
+        generated_exe = os.path.join(dist_dir, product_name + ".exe")
+        if not os.path.exists(dist_dir):
+            raise Exception(f"PyInstaller dist directory not found at {dist_dir}")
         if not os.path.exists(generated_exe):
-            raise Exception("Generated EXE not found.")
+            raise Exception(f"Generated EXE not found at {generated_exe}")
         
         shutil.move(generated_exe, wrapper_exe_path)
         set_file_permissions(wrapper_exe_path)
