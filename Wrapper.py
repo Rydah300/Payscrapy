@@ -28,8 +28,8 @@ def find_advanced_installer_path():
         return env_path
     
     possible_paths = [
-        r"C:\Program Files (x86)\Caphyon\Advanced Installer",
-        r"C:\Program Files\Caphyon\Advanced Installer",
+        r"C:\Program Files (x86)\Caphyon\Advanced Installer 22.9.1",
+        r"C:\Program Files\Caphyon\Advanced Installer 22.9.1",
     ]
     for base_path in possible_paths:
         if os.path.exists(base_path):
